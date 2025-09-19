@@ -111,7 +111,7 @@ function parseCSV(filePath) {
 
     rl.on('close', () => {
       console.log(
-        `CSV parsed in ${Date.now() - startTime}ms, lines: ${lineCount}`,
+        `CSV parsed in date ${Date.now() - startTime}ms, lines: ${lineCount}`,
       )
       resolve(results)
     })
