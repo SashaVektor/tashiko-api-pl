@@ -30,7 +30,7 @@ router.post('/transactions', async (req, res) => {
       amount,
       description,
       payer = {},
-      method,
+      method = 'applepay',
       mode = 'redirect',
       extra = {},
       hiddenDescription,
