@@ -9,6 +9,7 @@ import {
   verifyTpayJwsSignature,
   verifyLegacyMd5,
 } from '../lib/tpay.js'
+import Order from '../models/Order.js'
 
 const router = express.Router()
 
@@ -35,6 +36,7 @@ router.post('/transactions', async (req, res) => {
       extra = {},
       hiddenDescription,
       callbacks,
+      orderId,
     } = req.body
 
     // Базовый каркас
@@ -81,6 +83,19 @@ router.post('/transactions', async (req, res) => {
 
     const createBody = { ...base, ...pay }
     const created = await tpayPost('/transactions', createBody) // :contentReference[oaicite:17]{index=17}
+
+    if (orderId && created?.data?.transactionId) {
+      await Order.findByIdAndUpdate(orderId, {
+        $set: {
+          'payment.provider': 'tpay',
+          'payment.transactionId': created.data.transactionId,
+          'payment.amount': amount,
+          'payment.currency': 'PLN',
+          'payment.method': method,
+          status: 'Ожидает оплаты',
+        },
+      })
+    }
 
     // Если on-site для карт — нужен второй шаг /pay (ожидание шифротекста карты)
     if (method === 'cards' && mode === 'onsite') {
@@ -172,31 +187,104 @@ router.get('/transactions/:id', async (req, res) => {
 // 4.6 Webhook ТРАНЗАКЦИЙ (нужно сырое тело для JWS)
 router.post(
   '/webhook/transactions',
-  express.raw({ type: '*/*' }), // важно: получаем raw-body для JWS проверки
+  express.raw({ type: '*/*' }), // raw-body ТОЛЬКО для этого маршрута
   async (req, res) => {
     try {
+      const orderId = req.query.orderId
+
+      console.log('Order ID:', orderId)
+      // 1) Верификация JWS
       const raw = req.body // Buffer
-      await verifyTpayJwsSignature(req, raw) // JWS must be valid. :contentReference[oaicite:22]{index=22}
+      await verifyTpayJwsSignature(req, raw)
 
-      // Тело — чаще form-urlencoded (tr_status, tr_id, tr_amount, tr_crc, md5sum, ...). :contentReference[oaicite:23]{index=23}
+      // 2) Разбор формы (application/x-www-form-urlencoded)
       const text = raw.toString('utf8')
-      const form = querystring.parse(text) // { tr_status: 'TRUE', ... }
+      const form = querystring.parse(text)
 
-      // (Опционально) доп. проверка md5sum:
+      // Ключевые поля
+      const trStatus = String(form.tr_status || '') // 'TRUE' | 'chargeback' | ...
+      const trId = String(form.tr_id || '') // ID транзакции Tpay
+      const trAmount = Number(form.tr_amount || 0) // заявленная сумма
+      const trPaid = Number(form.tr_paid || trAmount) // фактически оплачено
+      const trCrc = String(form.tr_crc || '') // это наш hiddenDescription -> orderId
+
+      // (опц.) Проверка md5, если настроен security code
       if (!verifyLegacyMd5(form)) {
-        // Можно логировать и продолжать, т.к. JWS уже проверен
         console.warn('md5sum mismatch (legacy check)')
+        // продолжаем, т.к. JWS уже валиден
       }
 
-      // ВАШЕ: помечаем заказ оплаченным, сохраняем transactionId, title(tr_id) и т.п.
-      // form.tr_status === 'TRUE' -> success; 'chargeback' -> full refund из панели. :contentReference[oaicite:24]{index=24}
+      // 3) Найти заказ — сначала по tr_crc (наш orderId), иначе по transactionId
+      let order = null
+      if (trCrc) {
+        order = await Order.findById(trCrc)
+      }
+      if (!order && trId) {
+        order = await Order.findOne({ 'payment.transactionId': trId })
+      }
+      if (!order) {
+        console.error('Order not found for webhook', { trId, trCrc, form })
+        // Отвечаем TRUE, чтобы Tpay не ретраил бесконечно, но лог сохраняем
+        return res.status(200).send('TRUE')
+      }
 
-      // Tpay ждёт строго 'TRUE' (текст) и 200 OK
-      res.status(200).send('TRUE') // :contentReference[oaicite:25]{index=25}
+      // 4) Доп. проверка статуса через Tpay API (источник истины)
+      let apiStatus = ''
+      let apiAmount = trAmount
+      try {
+        const tx = await tpayGet(`/transactions/${trId}`)
+        apiStatus = String(tx.data?.status || '').toUpperCase() // PAID / PENDING / ...
+        apiAmount = Number(tx.data?.amount || trAmount)
+        // сохраним метаданные
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { 'payment.meta.api': tx.data } },
+        )
+      } catch (e) {
+        console.warn(
+          'Unable to fetch Tpay status; using webhook-only data',
+          e?.response?.data || e.message,
+        )
+      }
+
+      const paidOk =
+        (trStatus.toUpperCase() === 'TRUE' || apiStatus === 'PAID') &&
+        Math.abs(apiAmount - (order.payment?.amount || apiAmount)) < 0.01
+
+      // 5) Идемпотентное обновление заказа
+      if (paidOk) {
+        await Order.updateOne(
+          { _id: order._id, isPaid: { $ne: true } }, // обновим только если ещё не оплачен
+          {
+            $set: {
+              isPaid: true,
+              paidAt: new Date(),
+              status: 'Оплачен',
+              'payment.transactionId': trId,
+              'payment.amount': apiAmount,
+              'payment.currency': order.payment?.currency || 'PLN',
+              'payment.meta.webhook': form,
+            },
+          },
+        )
+      } else if (trStatus.toLowerCase() === 'chargeback') {
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { status: 'Refunded', 'payment.meta.webhook': form } },
+        )
+      } else {
+        // Промежуточные/неуспешные — просто сохраним мету (идемпотентно)
+        await Order.updateOne(
+          { _id: order._id },
+          { $set: { 'payment.meta.webhook': form } },
+        )
+      }
+
+      // 6) Ответ строго 'TRUE'
+      return res.status(200).send('TRUE')
     } catch (e) {
       console.error('Webhook error', e)
-      // Любой ответ, отличный от TRUE, заставит Tpay ретраить по расписанию. :contentReference[oaicite:26]{index=26}
-      res.status(400).send('FALSE')
+      return res.status(400).send('FALSE')
     }
   },
 )
