@@ -21,6 +21,7 @@ import monobankRoute from './routes/monobankRoute.js'
 import productFeedRoute from './routes/productFeedRoute.js'
 import statisticsRouter from './routes/statisticsRoute.js'
 import dollarRateRoute from './routes/dollarRateRoute.js'
+import contactRoute from './routes/contactRoute.js'
 import ProductFeed from './models/ProductFeed.js'
 
 import tpayRouter from './routes/tpayRouter.js'
@@ -50,6 +51,7 @@ app.use('/api/locations', locationRoute)
 app.use('/api/garage', userGarageRoute)
 app.use('/api/monobank', monobankRoute)
 app.use('/api/dollar-rate', dollarRateRoute)
+app.use('/api/contact', contactRoute)
 
 // ----------- OPTIMIZED CSV SYNC FUNCTION (FTP) --------------------
 

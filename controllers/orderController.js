@@ -1,6 +1,11 @@
 import expressAsyncHandler from 'express-async-handler'
 import Order from '../models/Order.js'
 import ProductFeed from '../models/ProductFeed.js'
+import {
+  adminEmailPL,
+  customerEmailPL,
+} from '../utils/templates/emailTemplates.js'
+import { sendMail } from '../utils/mailer.js'
 
 export const createOrder = expressAsyncHandler(async (req, res) => {
   try {
@@ -17,7 +22,12 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
       comment,
       status,
       isPaid,
+      email,
     } = req.body
+
+    if (!Array.isArray(basketItems) || basketItems.length === 0) {
+      return res.status(400).send({ message: 'basketItems is required' })
+    }
 
     const newOrder = new Order({
       userId: userId || '',
@@ -61,6 +71,43 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
         )
       }
     }
+
+    const adminTo = process.env.ADMIN_EMAIL || 'inbox.vikingcars@gmail.com'
+
+    const tasks = []
+
+    if (email) {
+      const c = customerEmailPL({
+        name: newOrder.userInfo.name,
+        phone: newOrder.userInfo.phone,
+        items: basketItems,
+        orderId: order._id,
+      })
+      tasks.push(
+        sendMail({ to: email, subject: c.subject, html: c.html, text: c.text }),
+      )
+    }
+
+    const a = adminEmailPL({
+      name: newOrder.userInfo.name,
+      phone: newOrder.userInfo.phone,
+      items: basketItems,
+      orderId: order._id,
+    })
+    tasks.push(
+      sendMail({ to: adminTo, subject: a.subject, html: a.html, text: a.text }),
+    )
+
+    Promise.allSettled(tasks).then((results) => {
+      results.forEach((r) => {
+        if (r.status === 'rejected') {
+          console.error(
+            '[Mailer] send failed:',
+            r.reason?.response || r.reason?.message || r.reason,
+          )
+        }
+      })
+    })
 
     res.status(201).send({ message: 'Заказ успешно создан!', order })
   } catch (err) {
