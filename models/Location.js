@@ -25,6 +25,18 @@ const locationSchema = new mongoose.Schema(
           type: String,
           required: true,
         },
+        enabled: {
+          type: Boolean,
+          default: true,
+        },
+        availableForPickup: {
+          type: Boolean,
+          default: true,
+        },
+        order: {
+          type: Number,
+          default: 0,
+        },
       },
     ],
   },
