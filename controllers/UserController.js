@@ -4,6 +4,136 @@ import User from '../models/User.js'
 import { generateToken } from '../utils.js'
 import { sendMail } from '../utils/mailer.js'
 import { welcomeEmailPL } from '../utils/templates/welcome-pl.js'
+import Order from '../models/Order.js'
+
+const escapeRegExp = (value = '') =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+export const getAdminCustomers = expressAsyncHandler(async (req, res) => {
+  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
+  const limit = Math.min(
+    Math.max(Number.parseInt(req.query.limit, 10) || 20, 1),
+    100,
+  )
+  const query = String(req.query.q || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 100)
+  const orderFilter = ['with', 'without'].includes(req.query.orders)
+    ? req.query.orders
+    : 'all'
+  const sortOptions = {
+    newest: { createdAt: -1, _id: 1 },
+    oldest: { createdAt: 1, _id: 1 },
+    'name-asc': { name: 1, _id: 1 },
+    'name-desc': { name: -1, _id: 1 },
+    'orders-desc': { orderCount: -1, createdAt: -1 },
+    'orders-asc': { orderCount: 1, createdAt: -1 },
+  }
+  const sort = sortOptions[req.query.sort] || sortOptions.newest
+  const filter = { status: { $ne: 'adm' } }
+  if (query) {
+    const regex = new RegExp(escapeRegExp(query), 'i')
+    filter.$or = [
+      { name: regex },
+      { email: regex },
+      { phone: regex },
+      { fop: regex },
+    ]
+  }
+  const orderCountMatch =
+    orderFilter === 'with'
+      ? { orderCount: { $gt: 0 } }
+      : orderFilter === 'without'
+        ? { orderCount: 0 }
+        : {}
+  const [result] = await User.aggregate([
+    { $match: filter },
+    {
+      $lookup: {
+        from: 'orders',
+        let: { customerId: { $toString: '$_id' } },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$userId', '$$customerId'] } } },
+          { $count: 'count' },
+        ],
+        as: 'orderStats',
+      },
+    },
+    {
+      $addFields: {
+        orderCount: { $ifNull: [{ $first: '$orderStats.count' }, 0] },
+      },
+    },
+    { $match: orderCountMatch },
+    {
+      $project: {
+        name: 1,
+        email: 1,
+        phone: 1,
+        address: 1,
+        fop: 1,
+        status: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        orderCount: 1,
+      },
+    },
+    {
+      $facet: {
+        customers: [
+          { $sort: sort },
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+        ],
+        total: [{ $count: 'count' }],
+      },
+    },
+  ]).collation({ locale: 'pl', strength: 1 })
+  const customers = result.customers
+  const totalCustomers = result.total[0]?.count || 0
+  res.json({
+    customers,
+    totalCustomers,
+    page,
+    limit,
+    totalPages: Math.ceil(totalCustomers / limit),
+  })
+})
+
+export const getAdminCustomerProfile = expressAsyncHandler(async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+  const customer = await User.findById(req.params.id).select(
+    'name email phone address fop status createdAt updatedAt',
+  )
+  if (!customer || customer.status === 'adm') {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
+  const limit = Math.min(
+    Math.max(Number.parseInt(req.query.limit, 10) || 10, 1),
+    100,
+  )
+  const filter = { userId: String(customer._id) }
+  const [orders, totalOrders] = await Promise.all([
+    Order.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Order.countDocuments(filter),
+  ])
+  res.json({
+    customer,
+    orders,
+    totalOrders,
+    page,
+    limit,
+    totalPages: Math.ceil(totalOrders / limit),
+  })
+})
 
 export const signIn = expressAsyncHandler(async (req, res) => {
   try {
