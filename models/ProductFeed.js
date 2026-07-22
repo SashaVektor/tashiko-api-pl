@@ -1,11 +1,14 @@
 import mongoose from "mongoose";
 
 const productFeedSchema = new mongoose.Schema({
+  source: { type: String, enum: ["ftp", "admin"], default: "ftp", index: true },
   item_code: { type: String },
   position_name: { type: String },
   position_name_ukr: { type: String },
   search_queries: { type: String },
   search_queries_ukr: { type: String },
+  description: { type: String },
+  description_ukr: { type: String },
   product_type: { type: String },
   price: { type: String },
   currency: { type: String },

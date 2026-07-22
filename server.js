@@ -1,64 +1,65 @@
-import express from 'express'
-import dotenv from 'dotenv'
-import mongoose from 'mongoose'
-import cors from 'cors'
-import cron from 'node-cron'
-import ftp from 'basic-ftp'
-import csv from 'csv-parser'
-import fs from 'fs'
-import path from 'path'
-import readline from 'readline'
+import express from "express";
+import dotenv from "dotenv";
+import mongoose from "mongoose";
+import cors from "cors";
+import cron from "node-cron";
+import ftp from "basic-ftp";
+import csv from "csv-parser";
+import fs from "fs";
+import path from "path";
+import readline from "readline";
 
-import userRouter from './routes/userRoute.js'
-import categoryRoute from './routes/categoryRoute.js'
-import uploadRouter from './routes/uploadRoute.js'
-import vinRoute from './routes/vinRequestRoute.js'
-import orderOneClickRouter from './routes/orderOneClickRoute.js'
-import orderRouter from './routes/orderRoute.js'
-import locationRoute from './routes/locationRoute.js'
-import userGarageRoute from './routes/userGarageRoute.js'
-import monobankRoute from './routes/monobankRoute.js'
-import productFeedRoute from './routes/productFeedRoute.js'
-import statisticsRouter from './routes/statisticsRoute.js'
-import dollarRateRoute from './routes/dollarRateRoute.js'
-import contactRoute from './routes/contactRoute.js'
-import siteSettingsRoute from './routes/siteSettingsRoute.js'
-import ProductFeed from './models/ProductFeed.js'
+import userRouter from "./routes/userRoute.js";
+import categoryRoute from "./routes/categoryRoute.js";
+import uploadRouter from "./routes/uploadRoute.js";
+import vinRoute from "./routes/vinRequestRoute.js";
+import orderOneClickRouter from "./routes/orderOneClickRoute.js";
+import orderRouter from "./routes/orderRoute.js";
+import locationRoute from "./routes/locationRoute.js";
+import userGarageRoute from "./routes/userGarageRoute.js";
+import monobankRoute from "./routes/monobankRoute.js";
+import productFeedRoute from "./routes/productFeedRoute.js";
+import statisticsRouter from "./routes/statisticsRoute.js";
+import dollarRateRoute from "./routes/dollarRateRoute.js";
+import contactRoute from "./routes/contactRoute.js";
+import siteSettingsRoute from "./routes/siteSettingsRoute.js";
+import ProductFeed from "./models/ProductFeed.js";
+import { isAdmin, isAuth } from "./utils.js";
 
-import tpayRouter from './routes/tpayRouter.js'
-import paypalRouter from './routes/paypalRoute.js'
+import tpayRouter from "./routes/tpayRouter.js";
+import paypalRouter from "./routes/paypalRoute.js";
 
-dotenv.config()
+dotenv.config();
 mongoose
   .connect(process.env.MONGODB_URL)
-  .then(() => console.log('Connected to db'))
-  .catch((err) => console.log(err.message))
+  .then(() => console.log("Connected to db"))
+  .catch((err) => console.log(err.message));
 
-const app = express()
-app.use(cors())
-app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-app.use('/api/users', userRouter)
-app.use('/api/categories', categoryRoute)
-app.use('/api/vin', vinRoute)
-app.use('/api/upload', uploadRouter)
-app.use('/api/products-feed', productFeedRoute)
-app.use('/api/orders', orderOneClickRouter)
-app.use('/api/order', orderRouter)
-app.use('/api/statistics', statisticsRouter)
+app.use("/api/users", userRouter);
+app.use("/api/categories", categoryRoute);
+app.use("/api/vin", vinRoute);
+app.use("/api/upload", uploadRouter);
+app.use("/api/products-feed", productFeedRoute);
+app.use("/api/orders", orderOneClickRouter);
+app.use("/api/order", orderRouter);
+app.use("/api/statistics", statisticsRouter);
 
-app.use('/api/locations', locationRoute)
-app.use('/api/garage', userGarageRoute)
-app.use('/api/monobank', monobankRoute)
-app.use('/api/dollar-rate', dollarRateRoute)
-app.use('/api/contact', contactRoute)
-app.use('/api/site-settings', siteSettingsRoute)
+app.use("/api/locations", locationRoute);
+app.use("/api/garage", userGarageRoute);
+app.use("/api/monobank", monobankRoute);
+app.use("/api/dollar-rate", dollarRateRoute);
+app.use("/api/contact", contactRoute);
+app.use("/api/site-settings", siteSettingsRoute);
 
 // ----------- OPTIMIZED CSV SYNC FUNCTION (FTP) --------------------
 
 async function downloadCSV() {
-  const client = new ftp.Client()
+  const client = new ftp.Client();
   try {
     await client.access({
       host: process.env.FTP_HOST,
@@ -66,80 +67,80 @@ async function downloadCSV() {
       user: process.env.FTP_USER,
       password: process.env.FTP_PASS,
       secure: false,
-    })
+    });
 
-    const outputPath = path.join('./', 'Products_PL.csv')
-    await client.downloadTo(outputPath, '/Products_PL.csv')
-    return outputPath
+    const outputPath = path.join("./", "Products_PL.csv");
+    await client.downloadTo(outputPath, "/Products_PL.csv");
+    return outputPath;
   } catch (err) {
-    console.error('Ошибка при загрузке с FTP:', err)
-    throw err
+    console.error("Ошибка при загрузке с FTP:", err);
+    throw err;
   } finally {
-    client.close()
+    client.close();
   }
 }
 
 function parseCSV(filePath) {
   return new Promise((resolve, reject) => {
-    const results = []
-    let lineCount = 0
-    const startTime = Date.now()
+    const results = [];
+    let lineCount = 0;
+    const startTime = Date.now();
 
     const stream = fs.createReadStream(filePath, {
-      encoding: 'utf8',
+      encoding: "utf8",
       highWaterMark: 64 * 1024,
-    })
+    });
 
     const rl = readline.createInterface({
       input: stream,
       crlfDelay: Infinity,
-    })
+    });
 
-    rl.on('line', (line) => {
-      lineCount++
+    rl.on("line", (line) => {
+      lineCount++;
       if (lineCount % 10000 === 0) {
-        console.log(`Обработано строк: ${lineCount}`)
+        console.log(`Обработано строк: ${lineCount}`);
       }
 
-      const trimmed = line.trim()
-      if (trimmed && !trimmed.startsWith('item_code')) {
-        const parts = trimmed.split(';')
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("item_code")) {
+        const parts = trimmed.split(";");
 
-        const item_code = parts[0]?.trim() || '0'
-        const position_name = parts[1]?.trim() || '0'
-        let quantity = parseInt(parts[2]) || 0
-        let price = parseFloat(parts[3]?.replace(',', '.')) || 0
+        const item_code = parts[0]?.trim() || "0";
+        const position_name = parts[1]?.trim() || "0";
+        let quantity = parseInt(parts[2]) || 0;
+        let price = parseFloat(parts[3]?.replace(",", ".")) || 0;
 
-        if (item_code && item_code !== '0') {
-          results.push({ item_code, position_name, quantity, price })
+        if (item_code && item_code !== "0") {
+          results.push({ item_code, position_name, quantity, price });
         }
       }
-    })
+    });
 
-    rl.on('close', () => {
+    rl.on("close", () => {
       console.log(
         `CSV parsed in date ${Date.now() - startTime}ms, lines: ${lineCount}`,
-      )
-      resolve(results)
-    })
+      );
+      resolve(results);
+    });
 
-    rl.on('error', reject)
-  })
+    rl.on("error", reject);
+  });
 }
 
 async function updateProducts(parsedData) {
-  const startTime = Date.now()
-  let updatedCount = 0
-  const batchSize = 1000
-  const bulkOps = []
+  const startTime = Date.now();
+  let updatedCount = 0;
+  const batchSize = 1000;
+  const bulkOps = [];
 
   // Подготовка bulk операций
   for (const item of parsedData) {
-    if (!item.item_code || isNaN(item.quantity) || isNaN(item.price)) continue
+    if (!item.item_code || isNaN(item.quantity) || isNaN(item.price)) continue;
 
     bulkOps.push({
       updateOne: {
-        filter: { item_code: item.item_code },
+        filter: { item_code: item.item_code, source: "ftp" },
         update: {
           $set: {
             quantity: item.quantity,
@@ -149,101 +150,101 @@ async function updateProducts(parsedData) {
         },
         upsert: false,
       },
-    })
+    });
 
     if (bulkOps.length >= batchSize) {
       try {
-        const result = await ProductFeed.bulkWrite(bulkOps)
-        updatedCount += result.modifiedCount
-        bulkOps.length = 0
+        const result = await ProductFeed.bulkWrite(bulkOps);
+        updatedCount += result.modifiedCount;
+        bulkOps.length = 0;
       } catch (error) {
-        console.error('Ошибка bulk операции:', error)
+        console.error("Ошибка bulk операции:", error);
       }
     }
   }
 
   if (bulkOps.length > 0) {
     try {
-      const result = await ProductFeed.bulkWrite(bulkOps)
-      updatedCount += result.modifiedCount
+      const result = await ProductFeed.bulkWrite(bulkOps);
+      updatedCount += result.modifiedCount;
     } catch (error) {
-      console.error('Ошибка финальной bulk операции:', error)
+      console.error("Ошибка финальной bulk операции:", error);
     }
   }
 
-  console.log(`Bulk update completed in ${Date.now() - startTime}ms`)
-  console.log(`Синхронизация завершена. Обновлено товаров: ${updatedCount}`)
+  console.log(`Bulk update completed in ${Date.now() - startTime}ms`);
+  console.log(`Синхронизация завершена. Обновлено товаров: ${updatedCount}`);
 
-  return updatedCount
+  return updatedCount;
 }
 
 async function syncProductsFromFTP() {
   try {
-    console.time('FTP Sync Total Time')
+    console.time("FTP Sync Total Time");
 
-    console.time('FTP Download')
-    const filePath = await downloadCSV()
-    console.timeEnd('FTP Download')
+    console.time("FTP Download");
+    const filePath = await downloadCSV();
+    console.timeEnd("FTP Download");
 
     if (!filePath) {
-      throw new Error('Не удалось загрузить CSV файл')
+      throw new Error("Не удалось загрузить CSV файл");
     }
 
-    console.time('CSV Parsing')
-    const parsedData = await parseCSV(filePath)
-    console.timeEnd('CSV Parsing')
+    console.time("CSV Parsing");
+    const parsedData = await parseCSV(filePath);
+    console.timeEnd("CSV Parsing");
 
-    console.time('DB Update')
-    const updatedCount = await updateProducts(parsedData)
-    console.timeEnd('DB Update')
+    console.time("DB Update");
+    const updatedCount = await updateProducts(parsedData);
+    console.timeEnd("DB Update");
 
     try {
-      fs.unlinkSync(filePath)
-      console.log('Временный файл удален')
+      fs.unlinkSync(filePath);
+      console.log("Временный файл удален");
     } catch (cleanupError) {
-      console.warn('Не удалось удалить временный файл:', cleanupError)
+      console.warn("Не удалось удалить временный файл:", cleanupError);
     }
 
-    console.timeEnd('FTP Sync Total Time')
+    console.timeEnd("FTP Sync Total Time");
 
     return {
       success: true,
       updatedCount,
       totalProcessed: parsedData.length,
-    }
+    };
   } catch (error) {
-    console.error('Ошибка синхронизации CSV:', error)
+    console.error("Ошибка синхронизации CSV:", error);
     return {
       success: false,
       error: error.message,
-    }
+    };
   }
 }
-app.get('/api/sync-products', async (req, res) => {
+app.get("/api/sync-products", isAuth, isAdmin, async (req, res) => {
   try {
-    console.log('Получен запрос на синхронизацию продуктов')
-    const result = await syncProductsFromFTP()
+    console.log("Получен запрос на синхронизацию продуктов");
+    const result = await syncProductsFromFTP();
 
     if (result.success) {
       res.status(200).json({
-        message: 'Синхронизация завершена успешно',
+        message: "Синхронизация завершена успешно",
         updatedCount: result.updatedCount,
         totalProcessed: result.totalProcessed,
-      })
+      });
     } else {
       res.status(500).json({
-        message: 'Ошибка при синхронизации продуктов',
+        message: "Ошибка при синхронизации продуктов",
         error: result.error,
-      })
+      });
     }
   } catch (err) {
-    console.error('Ошибка при синхронизации:', err)
-    res.status(500).json({ message: 'Ошибка при синхронизации продуктов' })
+    console.error("Ошибка при синхронизации:", err);
+    res.status(500).json({ message: "Ошибка при синхронизации продуктов" });
   }
-})
+});
 
-app.use('/api/tpay', tpayRouter)
-app.use('/api/paypal', paypalRouter)
+app.use("/api/tpay", tpayRouter);
+app.use("/api/paypal", paypalRouter);
 
 // async function syncPolishProducts() {
 //   try {
@@ -609,8 +610,8 @@ app.use('/api/paypal', paypalRouter)
 //   await syncProductsFromFTP()
 // })
 
-const port = process.env.PORT || 4200
+const port = process.env.PORT || 4200;
 app.listen(port, async () => {
-  console.log(`Server ok on ${port}`)
+  console.log(`Server ok on ${port}`);
   // await removeNullCharacteristics()
-})
+});
