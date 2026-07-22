@@ -1,10 +1,82 @@
 import expressAsyncHandler from 'express-async-handler'
 import ProductFeed from '../models/ProductFeed.js'
 import CrossNumbers from '../models/CrossNumbers.js'
+import {
+  buildProductFilter,
+  createSearchRegex,
+  getCollation,
+  getPagination,
+  getProductSort,
+  normalizeSearchQuery,
+} from '../utils/productQuery.js'
+
+export const getProductCatalog = async (req, res) => {
+  try {
+    const {
+      q = '',
+      category,
+      sort = 'availability',
+      language = 'pl',
+      page: pageValue,
+      limit: limitValue,
+    } = req.query
+    const { page, limit, skip } = getPagination(pageValue, limitValue)
+    const normalizedQuery = normalizeSearchQuery(q)
+    let filter = buildProductFilter({ query: normalizedQuery, groupName: category })
+
+    if (normalizedQuery) {
+      const crossMappings = await CrossNumbers.find({
+        $or: [
+          { article_a: createSearchRegex(normalizedQuery) },
+          { article_b: createSearchRegex(normalizedQuery) },
+        ],
+      }).select('article_a')
+      const crossCodes = [...new Set(crossMappings.map(({ article_a }) => article_a))]
+
+      if (crossCodes.length) {
+        const searchFilter = buildProductFilter({ query: normalizedQuery })
+        const combinedSearch = {
+          $or: [searchFilter, { item_code: { $in: crossCodes } }],
+        }
+        filter = category
+          ? { $and: [{ group_name: category }, combinedSearch] }
+          : combinedSearch
+      }
+    }
+
+    const [products, totalProducts] = await Promise.all([
+      ProductFeed.find(filter)
+        .collation(getCollation(language))
+        .sort(getProductSort(sort, language))
+        .skip(skip)
+        .limit(limit),
+      ProductFeed.countDocuments(filter),
+    ])
+
+    res.status(200).json({
+      products,
+      totalProducts,
+      page,
+      limit,
+      totalPages: Math.ceil(totalProducts / limit),
+      query: normalizedQuery,
+    })
+  } catch (error) {
+    console.error(error)
+    res.status(500).json({ message: 'INTERNAL SERVER ERROR' })
+  }
+}
 
 export const searchProductsFeed = async (req, res) => {
   try {
-    const { selectedBrand, selectedMark, category, selectedYear } = req.query
+    const {
+      selectedBrand,
+      selectedMark,
+      category,
+      selectedYear,
+      sort = 'availability',
+      language = 'pl',
+    } = req.query
 
     if (!selectedBrand || !selectedMark) {
       return res
@@ -36,7 +108,9 @@ export const searchProductsFeed = async (req, res) => {
       ]
     }
 
-    const products = await ProductFeed.find(filter).sort({ quantity: -1 })
+    const products = await ProductFeed.find(filter)
+      .collation(getCollation(language))
+      .sort(getProductSort(sort, language))
 
     return res.status(200).json(products)
   } catch (error) {
@@ -135,7 +209,13 @@ export const getProductsFeedByGroup = async (req, res) => {
 export const getProductsFeedByGroupWithLimit = async (req, res) => {
   try {
     const { groupName } = req.params
-    const { page = 1, limit = 20 } = req.query
+    const {
+      page: pageValue,
+      limit: limitValue,
+      sort = 'availability',
+      language = 'pl',
+      q = '',
+    } = req.query
 
     if (!groupName) {
       return res
@@ -143,18 +223,22 @@ export const getProductsFeedByGroupWithLimit = async (req, res) => {
         .json({ message: 'Категория (groupName) не передана' })
     }
 
-    const products = await ProductFeed.find({ group_name: groupName })
-      .sort({ quantity: -1 })
-      .skip((page - 1) * limit)
+    const { page, limit, skip } = getPagination(pageValue, limitValue)
+    const filter = buildProductFilter({ query: q, groupName })
+    const products = await ProductFeed.find(filter)
+      .collation(getCollation(language))
+      .sort(getProductSort(sort, language))
+      .skip(skip)
       .limit(limit)
 
-    const totalProducts = await ProductFeed.countDocuments({
-      group_name: groupName,
-    })
+    const totalProducts = await ProductFeed.countDocuments(filter)
 
     res.status(200).json({
       products,
       totalProducts,
+      page,
+      limit,
+      totalPages: Math.ceil(totalProducts / limit),
     })
   } catch (error) {
     console.error(error)
@@ -181,16 +265,22 @@ export const getProductsByNumber = async (req, res) => {
   const { number } = req.params
 
   try {
+    const normalizedNumber = normalizeSearchQuery(number)
+    if (!normalizedNumber) {
+      return res.status(400).send({ message: 'Wprowadź numer produktu.' })
+    }
+    const numberRegex = createSearchRegex(normalizedNumber)
+
     // Поиск по методу 1: прямое совпадение по item_code
     const directProducts = await ProductFeed.find({
-      item_code: { $regex: number, $options: 'i' },
+      item_code: numberRegex,
     })
 
     // Поиск по методу 2: через кросс-номера
     const mappings = await CrossNumbers.find({
       $or: [
-        { article_b: { $regex: number, $options: 'i' } },
-        { article_a: { $regex: number, $options: 'i' } },
+        { article_b: numberRegex },
+        { article_a: numberRegex },
       ],
     })
 

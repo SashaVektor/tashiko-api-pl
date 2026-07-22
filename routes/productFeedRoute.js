@@ -9,6 +9,7 @@ import {
   editProduct,
   getProductsByNumber,
   getProductsBrands,
+  getProductCatalog,
 } from '../controllers/productFeedController.js'
 
 const productFeedRoute = express.Router()
@@ -16,6 +17,8 @@ const productFeedRoute = express.Router()
 productFeedRoute.get('/', getProductsFeed)
 
 productFeedRoute.get('/brands/get-brands', getProductsBrands)
+
+productFeedRoute.get('/catalog/search', getProductCatalog)
 
 productFeedRoute.get('/:productCode', getProductFeed)
 
