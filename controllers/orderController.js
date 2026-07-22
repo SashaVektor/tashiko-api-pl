@@ -60,12 +60,14 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
     ) {
       for (const item of basketItems) {
         await ProductFeed.findOneAndUpdate(
-          {
-            $or: [
-              { position_name_ukr: item.name },
-              { position_name: item.name },
-            ],
-          },
+          item.productCode
+            ? { item_code: item.productCode }
+            : {
+                $or: [
+                  { position_name_ukr: item.name },
+                  { position_name: item.name },
+                ],
+              },
           { $inc: { quantity: -item.quantity } },
           { new: true },
         )
