@@ -5,9 +5,13 @@ import { generateToken } from '../utils.js'
 import { sendMail } from '../utils/mailer.js'
 import { welcomeEmailPL } from '../utils/templates/customerEmailTemplates.js'
 import Order from '../models/Order.js'
+import OrderOneClick from '../models/OrderOneClick.js'
 
 const escapeRegExp = (value = '') =>
   value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const regularOrdersCollection = Order.collection.name
+const oneClickOrdersCollection = OrderOneClick.collection.name
 
 export const getAdminCustomers = expressAsyncHandler(async (req, res) => {
   const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
@@ -52,18 +56,34 @@ export const getAdminCustomers = expressAsyncHandler(async (req, res) => {
     { $match: filter },
     {
       $lookup: {
-        from: 'orders',
+        from: regularOrdersCollection,
         let: { customerId: { $toString: '$_id' } },
         pipeline: [
           { $match: { $expr: { $eq: ['$userId', '$$customerId'] } } },
           { $count: 'count' },
         ],
-        as: 'orderStats',
+        as: 'regularOrderStats',
+      },
+    },
+    {
+      $lookup: {
+        from: oneClickOrdersCollection,
+        let: { customerId: { $toString: '$_id' } },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$userId', '$$customerId'] } } },
+          { $count: 'count' },
+        ],
+        as: 'oneClickOrderStats',
       },
     },
     {
       $addFields: {
-        orderCount: { $ifNull: [{ $first: '$orderStats.count' }, 0] },
+        orderCount: {
+          $add: [
+            { $ifNull: [{ $first: '$regularOrderStats.count' }, 0] },
+            { $ifNull: [{ $first: '$oneClickOrderStats.count' }, 0] },
+          ],
+        },
       },
     },
     { $match: orderCountMatch },
@@ -118,13 +138,31 @@ export const getAdminCustomerProfile = expressAsyncHandler(async (req, res) => {
     100,
   )
   const filter = { userId: String(customer._id) }
-  const [orders, totalOrders] = await Promise.all([
-    Order.find(filter)
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit),
-    Order.countDocuments(filter),
+  const [result] = await Order.aggregate([
+    { $match: filter },
+    { $addFields: { orderType: 'regular' } },
+    {
+      $unionWith: {
+        coll: oneClickOrdersCollection,
+        pipeline: [
+          { $match: filter },
+          { $addFields: { orderType: 'one-click' } },
+        ],
+      },
+    },
+    { $sort: { createdAt: -1, _id: -1 } },
+    {
+      $facet: {
+        orders: [
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+        ],
+        total: [{ $count: 'count' }],
+      },
+    },
   ])
+  const orders = result?.orders || []
+  const totalOrders = result?.total[0]?.count || 0
   res.json({
     customer,
     orders,
