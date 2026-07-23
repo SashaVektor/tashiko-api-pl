@@ -2,8 +2,11 @@ import expressAsyncHandler from "express-async-handler";
 import Order from "../models/OrderOneClick.js";
 import { adminEmailPL } from "../utils/templates/adminEmailTemplates.js";
 import { customerEmailPL } from "../utils/templates/customerEmailTemplates.js";
-import { sendMail } from "../utils/mailer.js";
 import { getAdminNotificationEmail } from "../utils/getAdminNotificationEmail.js";
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from "../services/emailOutbox.js";
 import {
   applyStockDelta,
   OrderValidationError,
@@ -46,46 +49,37 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
       const adminTo = await getAdminNotificationEmail();
       const items = priced.items;
 
-      const tasks = [];
+      const messages = [];
       if (email) {
         const c = customerEmailPL({ name, phone, items, orderId: order._id });
-        tasks.push(
-          sendMail({
-            to: email,
-            subject: c.subject,
-            html: c.html,
-            text: c.text,
-          }),
-        );
+        messages.push({
+          kind: "one-click-order-customer",
+          relatedId: String(order._id),
+          to: email,
+          subject: c.subject,
+          html: c.html,
+          text: c.text,
+        });
       }
 
       if (adminTo) {
         const a = adminEmailPL({ name, phone, items, orderId: order._id });
-        tasks.push(
-          sendMail({
-            to: adminTo,
-            subject: a.subject,
-            html: a.html,
-            text: a.text,
-          }),
-        );
+        messages.push({
+          kind: "one-click-order-admin",
+          relatedId: String(order._id),
+          to: adminTo,
+          subject: a.subject,
+          html: a.html,
+          text: a.text,
+        });
       } else {
         console.warn(
-          "[Mailer] No admin notification email configured in site settings",
+          "[Mailer] ADMIN_EMAIL is not configured",
         );
       }
 
-      // Не блокируем ответ клиенту — отправляем письма параллельно
-      Promise.allSettled(tasks).then((results) => {
-        results.forEach((r) => {
-          if (r.status === "rejected") {
-            console.error(
-              "[Mailer] send failed:",
-              r.reason?.response || r.reason?.message || r.reason,
-            );
-          }
-        });
-      });
+      const results = await queueEmailsAndAttempt(messages);
+      logEmailResults(results, `one-click order ${order._id}`);
     } catch (mailErr) {
       console.error("[Mailer] queueing failed:", mailErr);
     }

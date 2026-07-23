@@ -41,7 +41,7 @@ router.post(
         )
       })
     } else {
-      console.warn('[Mailer] No admin notification email configured in site settings')
+      console.warn('[Mailer] ADMIN_EMAIL is not configured')
     }
   }),
 )

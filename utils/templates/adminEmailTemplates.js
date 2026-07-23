@@ -1,8 +1,25 @@
 import { renderItemsTable } from './itemsTable.js'
 import { escapeHtml, sanitizeHeaderValue, sanitizeUrl } from './escapeHtml.js'
+import { renderOrderDetails } from './orderDetails.js'
 
-export function adminEmailPL({ name, phone, items, orderId }) {
+const orderDetailLabels = {
+  recipient: 'Odbiorca',
+  company: 'Firma',
+  deliveryMethod: 'Sposób dostawy',
+  city: 'Miasto',
+  address: 'Adres / punkt odbioru',
+  paymentMethod: 'Sposób płatności',
+  paymentStatus: 'Status płatności',
+  paymentPaid: 'Opłacono',
+  paymentUnpaid: 'Nie opłacono',
+  comment: 'Komentarz',
+  total: 'Razem',
+  quantity: 'Łączna liczba sztuk',
+}
+
+export function adminEmailPL({ name, phone, items, orderId, details }) {
   const itemsTable = renderItemsTable(items)
+  const orderDetails = renderOrderDetails(details, orderDetailLabels)
   const safeName = escapeHtml(name)
   const safePhone = escapeHtml(phone)
   const safeOrderId = escapeHtml(orderId)
@@ -16,6 +33,14 @@ export function adminEmailPL({ name, phone, items, orderId }) {
           <p style="margin:6px 0 0;color:#303637"><b>Klient:</b> ${safeName}</p>
           <p style="margin:6px 0 0;color:#303637"><b>Telefon:</b> ${safePhone}</p>
         </div>
+
+        ${
+          orderDetails.html
+            ? `<table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin:8px 0 16px">
+                 <tbody>${orderDetails.html}</tbody>
+               </table>`
+            : ''
+        }
 
         <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-top:8px">
           <thead>
@@ -33,7 +58,7 @@ export function adminEmailPL({ name, phone, items, orderId }) {
         <p style="margin:18px 0 0;color:#303637"><b>Uwaga:</b> to automatyczna wiadomość. Nie zapomnij przetworzyć zamówienia.</p>
       </div>
     `,
-    text: `Nowe zamówienie #${orderId}. Klient: ${name}, telefon: ${phone}.`,
+    text: `Nowe zamówienie #${orderId}. Klient: ${name}, telefon: ${phone}.${orderDetails.text ? `\n${orderDetails.text}` : ''}`,
   }
 }
 

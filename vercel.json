@@ -12,5 +12,11 @@
         "src": "/(.*)",
         "dest": "/server.js"
       }
+    ],
+    "crons": [
+      {
+        "path": "/api/internal/process-email-outbox",
+        "schedule": "*/5 * * * *"
+      }
     ]
   }

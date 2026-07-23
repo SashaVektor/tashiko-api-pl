@@ -2,8 +2,11 @@ import expressAsyncHandler from "express-async-handler";
 import Order from "../models/Order.js";
 import { adminEmailPL } from "../utils/templates/adminEmailTemplates.js";
 import { customerEmailPL } from "../utils/templates/customerEmailTemplates.js";
-import { sendMail } from "../utils/mailer.js";
 import { getAdminNotificationEmail } from "../utils/getAdminNotificationEmail.js";
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from "../services/emailOutbox.js";
 import {
   applyStockDelta,
   assertStockAvailable,
@@ -65,8 +68,20 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
 
     try {
       const adminTo = await getAdminNotificationEmail();
-
-      const tasks = [];
+      const messages = [];
+      const details = {
+        recipient: newOrder.userInfo.userDeliv,
+        company: newOrder.userInfo.fop,
+        deliveryMethod: newOrder.deliveryMethod,
+        city: newOrder.city,
+        address: newOrder.address,
+        paymentMethod: newOrder.paymentMethod,
+        isPaid: newOrder.isPaid,
+        comment: newOrder.comment,
+        totalPrice: newOrder.totalPrice,
+        totalQuantity: newOrder.totalQuantity,
+        currency: priced.items[0]?.currency || "PLN",
+      };
 
       if (email) {
         const c = customerEmailPL({
@@ -74,15 +89,16 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
           phone: newOrder.userInfo.phone,
           items: priced.items,
           orderId: order._id,
+          details,
         });
-        tasks.push(
-          sendMail({
-            to: email,
-            subject: c.subject,
-            html: c.html,
-            text: c.text,
-          }),
-        );
+        messages.push({
+          kind: "regular-order-customer",
+          relatedId: String(order._id),
+          to: email,
+          subject: c.subject,
+          html: c.html,
+          text: c.text,
+        });
       }
 
       if (adminTo) {
@@ -91,31 +107,24 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
           phone: newOrder.userInfo.phone,
           items: priced.items,
           orderId: order._id,
+          details,
         });
-        tasks.push(
-          sendMail({
-            to: adminTo,
-            subject: a.subject,
-            html: a.html,
-            text: a.text,
-          }),
-        );
+        messages.push({
+          kind: "regular-order-admin",
+          relatedId: String(order._id),
+          to: adminTo,
+          subject: a.subject,
+          html: a.html,
+          text: a.text,
+        });
       } else {
         console.warn(
-          "[Mailer] No admin notification email configured in site settings",
+          "[Mailer] ADMIN_EMAIL is not configured",
         );
       }
 
-      Promise.allSettled(tasks).then((results) => {
-        results.forEach((r) => {
-          if (r.status === "rejected") {
-            console.error(
-              "[Mailer] send failed:",
-              r.reason?.response || r.reason?.message || r.reason,
-            );
-          }
-        });
-      });
+      const results = await queueEmailsAndAttempt(messages);
+      logEmailResults(results, `regular order ${order._id}`);
     } catch (mailErr) {
       console.error("[Mailer] queueing failed:", mailErr);
     }

@@ -25,6 +25,7 @@ import contactRoute from "./routes/contactRoute.js";
 import siteSettingsRoute from "./routes/siteSettingsRoute.js";
 import ProductFeed from "./models/ProductFeed.js";
 import { isAdmin, isAuth } from "./utils.js";
+import { processEmailOutbox } from "./services/emailOutbox.js";
 
 import tpayRouter from "./routes/tpayRouter.js";
 import paypalRouter from "./routes/paypalRoute.js";
@@ -55,6 +56,19 @@ app.use("/api/monobank", monobankRoute);
 app.use("/api/dollar-rate", dollarRateRoute);
 app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
+
+app.get("/api/internal/process-email-outbox", async (req, res) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || req.headers.authorization !== `Bearer ${expected}`) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    return res.send(await processEmailOutbox(req.query.limit));
+  } catch (error) {
+    console.error("[Mailer] Outbox processing failed:", error);
+    return res.status(500).send({ message: "Email outbox processing failed" });
+  }
+});
 
 // ----------- OPTIMIZED CSV SYNC FUNCTION (FTP) --------------------
 

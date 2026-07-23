@@ -50,10 +50,6 @@ const siteSettingsSchema = new mongoose.Schema(
       emails: { type: [contactSchema], default: [] },
       phones: { type: [contactSchema], default: [] },
     },
-    notifications: {
-      adminEmail: { type: String, trim: true, default: '' },
-      adminEmailPl: { type: String, trim: true, default: '' },
-    },
     workingHours: { type: localizedTextSchema, default: () => ({}) },
     delivery: {
       title: { type: localizedTextSchema, default: () => ({}) },
