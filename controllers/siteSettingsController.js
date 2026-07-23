@@ -11,15 +11,29 @@ const emptySettings = {
   },
 }
 
-const editableFields = ({ contacts, workingHours, delivery }) => ({
+const toPublicSettings = (settings) => {
+  if (!settings) return emptySettings
+  const { notifications, ...publicSettings } = settings
+  return publicSettings
+}
+
+const editableFields = ({ contacts, workingHours, delivery, notifications }) => ({
   contacts,
   workingHours,
   delivery,
+  notifications,
 })
 
 export const getSiteSettings = expressAsyncHandler(async (_req, res) => {
   const settings = await SiteSettings.findOne({ key: 'site-settings' }).lean()
-  res.send(settings || emptySettings)
+
+  res.send(toPublicSettings(settings))
+})
+
+export const getAdminSiteSettings = expressAsyncHandler(async (_req, res) => {
+  const settings = await SiteSettings.findOne({ key: 'site-settings' }).lean()
+
+  res.send(settings || { ...emptySettings, notifications: { adminEmail: '', adminEmailPl: '' } })
 })
 
 export const updateSiteSettings = expressAsyncHandler(async (req, res) => {

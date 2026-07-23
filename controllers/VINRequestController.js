@@ -1,7 +1,8 @@
 import expressAsyncHandler from 'express-async-handler'
 import VINRequest from '../models/VINRequest.js'
 import { sendMail } from '../utils/mailer.js'
-import { vinAdminEmailPL } from '../utils/templates/emailTemplates.js'
+import { vinAdminEmailPL } from '../utils/templates/adminEmailTemplates.js'
+import { getAdminNotificationEmail } from '../utils/getAdminNotificationEmail.js'
 
 export const getVIN = expressAsyncHandler(async (req, res) => {
   try {
@@ -49,19 +50,23 @@ export const createVIN = expressAsyncHandler(async (req, res) => {
     // Отдаём ответ клиенту один раз
     res.status(200).send({ message: 'Запрос успешно отправлен!' })
 
-    const adminTo = process.env.ADMIN_EMAIL || 'admin@tashiko.pl'
-    const { subject, html, textPlain } = vinAdminEmailPL({
-      requestId: saved._id,
-      phone: saved.phone,
-      vin: saved.vin,
-      text: saved.text,
-      photo: saved.photo,
-      userId: saved.userId,
-    })
+    const adminTo = await getAdminNotificationEmail()
+    if (adminTo) {
+      const { subject, html, textPlain } = vinAdminEmailPL({
+        requestId: saved._id,
+        phone: saved.phone,
+        vin: saved.vin,
+        text: saved.text,
+        photo: saved.photo,
+        userId: saved.userId,
+      })
 
-    sendMail({ to: adminTo, subject, html, text: textPlain }).catch((e) =>
-      console.error('[VIN] Mail send error:', e?.response || e?.message || e),
-    )
+      sendMail({ to: adminTo, subject, html, text: textPlain }).catch((e) =>
+        console.error('[VIN] Mail send error:', e?.response || e?.message || e),
+      )
+    } else {
+      console.warn('[Mailer] No admin notification email configured in site settings')
+    }
   } catch (err) {
     console.error(err)
 

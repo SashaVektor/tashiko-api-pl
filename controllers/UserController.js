@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt'
 import User from '../models/User.js'
 import { generateToken } from '../utils.js'
 import { sendMail } from '../utils/mailer.js'
-import { welcomeEmailPL } from '../utils/templates/welcome-pl.js'
+import { welcomeEmailPL } from '../utils/templates/customerEmailTemplates.js'
 import Order from '../models/Order.js'
 
 const escapeRegExp = (value = '') =>

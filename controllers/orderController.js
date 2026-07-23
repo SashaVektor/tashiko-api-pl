@@ -1,5 +1,9 @@
 import expressAsyncHandler from "express-async-handler";
 import Order from "../models/Order.js";
+import { adminEmailPL } from "../utils/templates/adminEmailTemplates.js";
+import { customerEmailPL } from "../utils/templates/customerEmailTemplates.js";
+import { sendMail } from "../utils/mailer.js";
+import { getAdminNotificationEmail } from "../utils/getAdminNotificationEmail.js";
 import {
   applyStockDelta,
   assertStockAvailable,
@@ -20,6 +24,7 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
       city,
       address,
       comment,
+      email,
     } = req.body;
     if (
       !String(userInfo?.name || "").trim() ||
@@ -57,6 +62,63 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
 
     const order = await newOrder.save();
     rollbackStock = undefined;
+
+    try {
+      const adminTo = await getAdminNotificationEmail();
+
+      const tasks = [];
+
+      if (email) {
+        const c = customerEmailPL({
+          name: newOrder.userInfo.name,
+          phone: newOrder.userInfo.phone,
+          items: priced.items,
+          orderId: order._id,
+        });
+        tasks.push(
+          sendMail({
+            to: email,
+            subject: c.subject,
+            html: c.html,
+            text: c.text,
+          }),
+        );
+      }
+
+      if (adminTo) {
+        const a = adminEmailPL({
+          name: newOrder.userInfo.name,
+          phone: newOrder.userInfo.phone,
+          items: priced.items,
+          orderId: order._id,
+        });
+        tasks.push(
+          sendMail({
+            to: adminTo,
+            subject: a.subject,
+            html: a.html,
+            text: a.text,
+          }),
+        );
+      } else {
+        console.warn(
+          "[Mailer] No admin notification email configured in site settings",
+        );
+      }
+
+      Promise.allSettled(tasks).then((results) => {
+        results.forEach((r) => {
+          if (r.status === "rejected") {
+            console.error(
+              "[Mailer] send failed:",
+              r.reason?.response || r.reason?.message || r.reason,
+            );
+          }
+        });
+      });
+    } catch (mailErr) {
+      console.error("[Mailer] queueing failed:", mailErr);
+    }
 
     res.status(201).send({ message: "Заказ успешно создан!", order });
   } catch (error) {
