@@ -132,44 +132,49 @@ export const getAdminCustomerProfile = expressAsyncHandler(async (req, res) => {
   if (!customer || customer.status === 'adm') {
     return res.status(404).json({ message: 'Customer not found' })
   }
-  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
+  const regularPage = Math.max(
+    Number.parseInt(req.query.regularPage, 10) || 1,
+    1,
+  )
+  const oneClickPage = Math.max(
+    Number.parseInt(req.query.oneClickPage, 10) || 1,
+    1,
+  )
   const limit = Math.min(
     Math.max(Number.parseInt(req.query.limit, 10) || 10, 1),
     100,
   )
   const filter = { userId: String(customer._id) }
-  const [result] = await Order.aggregate([
-    { $match: filter },
-    { $addFields: { orderType: 'regular' } },
-    {
-      $unionWith: {
-        coll: oneClickOrdersCollection,
-        pipeline: [
-          { $match: filter },
-          { $addFields: { orderType: 'one-click' } },
-        ],
-      },
-    },
-    { $sort: { createdAt: -1, _id: -1 } },
-    {
-      $facet: {
-        orders: [
-          { $skip: (page - 1) * limit },
-          { $limit: limit },
-        ],
-        total: [{ $count: 'count' }],
-      },
-    },
+  const [
+    regularOrders,
+    totalRegularOrders,
+    oneClickOrders,
+    totalOneClickOrders,
+  ] = await Promise.all([
+    Order.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((regularPage - 1) * limit)
+      .limit(limit),
+    Order.countDocuments(filter),
+    OrderOneClick.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((oneClickPage - 1) * limit)
+      .limit(limit),
+    OrderOneClick.countDocuments(filter),
   ])
-  const orders = result?.orders || []
-  const totalOrders = result?.total[0]?.count || 0
+
   res.json({
     customer,
-    orders,
-    totalOrders,
-    page,
+    regularOrders,
+    oneClickOrders,
+    totalOrders: totalRegularOrders + totalOneClickOrders,
+    totalRegularOrders,
+    totalOneClickOrders,
+    regularPage,
+    oneClickPage,
     limit,
-    totalPages: Math.ceil(totalOrders / limit),
+    regularTotalPages: Math.ceil(totalRegularOrders / limit),
+    oneClickTotalPages: Math.ceil(totalOneClickOrders / limit),
   })
 })
 
