@@ -9,6 +9,7 @@ import {
   getProductSort,
   normalizeSearchQuery,
 } from "../utils/productQuery.js";
+import { enrichProductsWithPricing } from "../utils/orderPricing.js";
 
 export const getProductCatalog = async (req, res) => {
   try {
@@ -59,7 +60,7 @@ export const getProductCatalog = async (req, res) => {
     ]);
 
     res.status(200).json({
-      products,
+      products: await enrichProductsWithPricing(products),
       totalProducts,
       page,
       limit,
@@ -89,8 +90,8 @@ export const searchProductsFeed = async (req, res) => {
         .json({ message: "Selected brand and mark are required." });
     }
 
-    const brandRegex = new RegExp(selectedBrand, "i");
-    const markRegex = new RegExp(selectedMark, "i");
+    const brandRegex = createSearchRegex(selectedBrand);
+    const markRegex = createSearchRegex(selectedMark);
 
     let filter = {
       $and: [
@@ -99,7 +100,7 @@ export const searchProductsFeed = async (req, res) => {
       ],
     };
 
-    if (category) {
+    if (category && typeof category === "string") {
       filter.group_name = category;
     }
 
@@ -108,7 +109,7 @@ export const searchProductsFeed = async (req, res) => {
         { group_name: { $ne: "Амортизаторы TASHIKO" } },
         {
           group_name: "Амортизаторы TASHIKO",
-          value_characteristics3: { $regex: new RegExp(selectedYear, "i") },
+          value_characteristics3: { $regex: createSearchRegex(selectedYear) },
         },
       ];
     }
@@ -117,7 +118,9 @@ export const searchProductsFeed = async (req, res) => {
       .collation(getCollation(language))
       .sort(getProductSort(sort, language));
 
-    return res.status(200).json(products);
+    return res
+      .status(200)
+      .json(await enrichProductsWithPricing(products));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Internal server error" });
@@ -127,7 +130,7 @@ export const searchProductsFeed = async (req, res) => {
 export const getProductsFeed = async (req, res) => {
   try {
     const products = await ProductFeed.find().sort({ quantity: -1 });
-    res.send(products);
+    res.send(await enrichProductsWithPricing(products));
   } catch (err) {
     console.log(err);
     res.status(500).send({ message: "INTERNAL SERVER ERROR" });
@@ -204,7 +207,7 @@ export const getProductsFeedByGroup = async (req, res) => {
       quantity: -1,
     });
 
-    res.status(200).json(products);
+    res.status(200).json(await enrichProductsWithPricing(products));
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Ошибка на сервере" });
@@ -239,7 +242,7 @@ export const getProductsFeedByGroupWithLimit = async (req, res) => {
     const totalProducts = await ProductFeed.countDocuments(filter);
 
     res.status(200).json({
-      products,
+      products: await enrichProductsWithPricing(products),
       totalProducts,
       page,
       limit,
@@ -259,7 +262,7 @@ export const getProductFeed = async (req, res) => {
     if (!product) {
       res.status(401).send({ message: "Такого товару не існує!" });
     } else {
-      res.send(product);
+      res.send((await enrichProductsWithPricing([product]))[0]);
     }
   } catch (err) {
     res.status(401).send({ message: "Такого товару не знайдено!" });
@@ -306,7 +309,7 @@ export const getProductsByNumber = async (req, res) => {
     );
 
     if (uniqueProducts.length > 0) {
-      res.send(uniqueProducts);
+      res.send(await enrichProductsWithPricing(uniqueProducts));
     } else {
       res.status(404).send({ message: "Товарів не знайдено!" });
     }
@@ -317,6 +320,7 @@ export const getProductsByNumber = async (req, res) => {
 };
 
 const ADMIN_PRODUCT_FIELDS = [
+  "active",
   "position_name",
   "position_name_ukr",
   "search_queries",
@@ -365,6 +369,7 @@ export const createProduct = expressAsyncHandler(async (req, res) => {
   }
   const price = Number(req.body.price);
   const quantity = Number(req.body.quantity);
+  const currency = "PLN";
   if (
     !Number.isFinite(price) ||
     price < 0 ||
@@ -376,11 +381,13 @@ export const createProduct = expressAsyncHandler(async (req, res) => {
       .json({ message: "Price and quantity must be non-negative numbers" });
   }
   const product = await ProductFeed.create({
+    ...pickProductFields(req.body, ADMIN_PRODUCT_FIELDS),
     source,
     item_code: itemCode,
     price,
     quantity,
-    ...pickProductFields(req.body, ADMIN_PRODUCT_FIELDS),
+    currency,
+    active: req.body.active !== false,
   });
   res.status(201).json({ message: "Продукт создан успешно!", product });
 });
@@ -399,6 +406,7 @@ export const editProduct = expressAsyncHandler(async (req, res) => {
           : ADMIN_PRODUCT_FIELDS;
       const updates = pickProductFields(req.body, editableFields);
       updates.source = source;
+      updates.currency = "PLN";
 
       if (source === "admin") {
         const itemCode = String(

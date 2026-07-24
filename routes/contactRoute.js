@@ -1,7 +1,10 @@
 // routes/contactRoute.js
 import express from 'express'
 import expressAsyncHandler from 'express-async-handler'
-import { sendMail } from '../utils/mailer.js'
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from '../services/emailOutbox.js'
 import { contactAdminEmail } from '../utils/templates/adminEmailTemplates.js'
 import { getAdminNotificationEmail } from '../utils/getAdminNotificationEmail.js'
 
@@ -24,22 +27,28 @@ router.post(
     // отвечаем клиенту сразу, чтобы UI не ждал SMTP
     res.status(200).json({ message: 'Wiadomość została wysłana' })
 
-    // шлём письмо админу асинхронно
+    // шлём письмо админу через outbox (retry on SMTP failure)
     const adminTo = await getAdminNotificationEmail()
     if (adminTo) {
       const mail = contactAdminEmail({ phone, message, page })
 
-      sendMail({
-        to: adminTo,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.textPlain,
-      }).catch((e) => {
-        console.error(
-          '[CONTACT] Mail send error:',
-          e?.response || e?.message || e,
-        )
-      })
+      queueEmailsAndAttempt([
+        {
+          kind: 'contact-admin',
+          relatedId: cleaned,
+          to: adminTo,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.textPlain,
+        },
+      ])
+        .then((results) => logEmailResults(results, 'contact form'))
+        .catch((e) => {
+          console.error(
+            '[CONTACT] Mail queue error:',
+            e?.response || e?.message || e,
+          )
+        })
     } else {
       console.warn('[Mailer] ADMIN_EMAIL is not configured')
     }

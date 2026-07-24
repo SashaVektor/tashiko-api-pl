@@ -2,12 +2,6 @@ import express from "express";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import cors from "cors";
-import cron from "node-cron";
-import ftp from "basic-ftp";
-import csv from "csv-parser";
-import fs from "fs";
-import path from "path";
-import readline from "readline";
 
 import userRouter from "./routes/userRoute.js";
 import categoryRoute from "./routes/categoryRoute.js";
@@ -23,8 +17,13 @@ import statisticsRouter from "./routes/statisticsRoute.js";
 import dollarRateRoute from "./routes/dollarRateRoute.js";
 import contactRoute from "./routes/contactRoute.js";
 import siteSettingsRoute from "./routes/siteSettingsRoute.js";
-import ProductFeed from "./models/ProductFeed.js";
+import pricingRoute from "./routes/pricingRoute.js";
 import { isAdmin, isAuth } from "./utils.js";
+import {
+  getProductSyncHistory,
+  ProductSyncInProgressError,
+  syncProductsFromFTP,
+} from "./services/productSync.js";
 import { processEmailOutbox } from "./services/emailOutbox.js";
 
 import tpayRouter from "./routes/tpayRouter.js";
@@ -38,7 +37,17 @@ mongoose
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(
+  "/api/tpay/webhook/transactions",
+  express.raw({ type: "*/*" }),
+);
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/users", userRouter);
@@ -56,7 +65,43 @@ app.use("/api/monobank", monobankRoute);
 app.use("/api/dollar-rate", dollarRateRoute);
 app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
+app.use("/api/pricing", pricingRoute);
 
+const runProductSync = (trigger) => async (req, res) => {
+  try {
+    const result = await syncProductsFromFTP(trigger);
+    res.status(200).json({
+      message: "Синхронизация завершена успешно",
+      result,
+    });
+  } catch (error) {
+    console.error("[Product sync]", error);
+    res
+      .status(error instanceof ProductSyncInProgressError ? 409 : 500)
+      .json({
+        message: "Ошибка при синхронизации продуктов",
+        error: error.message,
+        debugSnapshot: error.debugSnapshot,
+      });
+  }
+};
+
+app.get(
+  "/api/sync-products/history",
+  isAuth,
+  isAdmin,
+  async (req, res) => {
+    res.send(await getProductSyncHistory(req.query.limit));
+  },
+);
+app.get("/api/sync-products", isAuth, isAdmin, runProductSync("admin"));
+app.get("/api/internal/sync-products", (req, res, next) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected || req.headers.authorization !== `Bearer ${expected}`) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  return runProductSync("cron")(req, res, next);
+});
 app.get("/api/internal/process-email-outbox", async (req, res) => {
   const expected = process.env.CRON_SECRET;
   if (!expected || req.headers.authorization !== `Bearer ${expected}`) {
@@ -67,193 +112,6 @@ app.get("/api/internal/process-email-outbox", async (req, res) => {
   } catch (error) {
     console.error("[Mailer] Outbox processing failed:", error);
     return res.status(500).send({ message: "Email outbox processing failed" });
-  }
-});
-
-// ----------- OPTIMIZED CSV SYNC FUNCTION (FTP) --------------------
-
-async function downloadCSV() {
-  const client = new ftp.Client();
-  try {
-    await client.access({
-      host: process.env.FTP_HOST,
-      port: Number(process.env.FTP_PORT),
-      user: process.env.FTP_USER,
-      password: process.env.FTP_PASS,
-      secure: false,
-    });
-
-    const outputPath = path.join("./", "Products_PL.csv");
-    await client.downloadTo(outputPath, "/Products_PL.csv");
-    return outputPath;
-  } catch (err) {
-    console.error("Ошибка при загрузке с FTP:", err);
-    throw err;
-  } finally {
-    client.close();
-  }
-}
-
-function parseCSV(filePath) {
-  return new Promise((resolve, reject) => {
-    const results = [];
-    let lineCount = 0;
-    const startTime = Date.now();
-
-    const stream = fs.createReadStream(filePath, {
-      encoding: "utf8",
-      highWaterMark: 64 * 1024,
-    });
-
-    const rl = readline.createInterface({
-      input: stream,
-      crlfDelay: Infinity,
-    });
-
-    rl.on("line", (line) => {
-      lineCount++;
-      if (lineCount % 10000 === 0) {
-        console.log(`Обработано строк: ${lineCount}`);
-      }
-
-      const trimmed = line.trim();
-      if (trimmed && !trimmed.startsWith("item_code")) {
-        const parts = trimmed.split(";");
-
-        const item_code = parts[0]?.trim() || "0";
-        const position_name = parts[1]?.trim() || "0";
-        let quantity = parseInt(parts[2]) || 0;
-        let price = parseFloat(parts[3]?.replace(",", ".")) || 0;
-
-        if (item_code && item_code !== "0") {
-          results.push({ item_code, position_name, quantity, price });
-        }
-      }
-    });
-
-    rl.on("close", () => {
-      console.log(
-        `CSV parsed in date ${Date.now() - startTime}ms, lines: ${lineCount}`,
-      );
-      resolve(results);
-    });
-
-    rl.on("error", reject);
-  });
-}
-
-async function updateProducts(parsedData) {
-  const startTime = Date.now();
-  let updatedCount = 0;
-  const batchSize = 1000;
-  const bulkOps = [];
-
-  // Подготовка bulk операций
-  for (const item of parsedData) {
-    if (!item.item_code || isNaN(item.quantity) || isNaN(item.price)) continue;
-
-    bulkOps.push({
-      updateOne: {
-        filter: { item_code: item.item_code, source: "ftp" },
-        update: {
-          $set: {
-            quantity: item.quantity,
-            price: item.price,
-            updatedAt: new Date(),
-          },
-        },
-        upsert: false,
-      },
-    });
-
-    if (bulkOps.length >= batchSize) {
-      try {
-        const result = await ProductFeed.bulkWrite(bulkOps);
-        updatedCount += result.modifiedCount;
-        bulkOps.length = 0;
-      } catch (error) {
-        console.error("Ошибка bulk операции:", error);
-      }
-    }
-  }
-
-  if (bulkOps.length > 0) {
-    try {
-      const result = await ProductFeed.bulkWrite(bulkOps);
-      updatedCount += result.modifiedCount;
-    } catch (error) {
-      console.error("Ошибка финальной bulk операции:", error);
-    }
-  }
-
-  console.log(`Bulk update completed in ${Date.now() - startTime}ms`);
-  console.log(`Синхронизация завершена. Обновлено товаров: ${updatedCount}`);
-
-  return updatedCount;
-}
-
-async function syncProductsFromFTP() {
-  try {
-    console.time("FTP Sync Total Time");
-
-    console.time("FTP Download");
-    const filePath = await downloadCSV();
-    console.timeEnd("FTP Download");
-
-    if (!filePath) {
-      throw new Error("Не удалось загрузить CSV файл");
-    }
-
-    console.time("CSV Parsing");
-    const parsedData = await parseCSV(filePath);
-    console.timeEnd("CSV Parsing");
-
-    console.time("DB Update");
-    const updatedCount = await updateProducts(parsedData);
-    console.timeEnd("DB Update");
-
-    try {
-      fs.unlinkSync(filePath);
-      console.log("Временный файл удален");
-    } catch (cleanupError) {
-      console.warn("Не удалось удалить временный файл:", cleanupError);
-    }
-
-    console.timeEnd("FTP Sync Total Time");
-
-    return {
-      success: true,
-      updatedCount,
-      totalProcessed: parsedData.length,
-    };
-  } catch (error) {
-    console.error("Ошибка синхронизации CSV:", error);
-    return {
-      success: false,
-      error: error.message,
-    };
-  }
-}
-app.get("/api/sync-products", isAuth, isAdmin, async (req, res) => {
-  try {
-    console.log("Получен запрос на синхронизацию продуктов");
-    const result = await syncProductsFromFTP();
-
-    if (result.success) {
-      res.status(200).json({
-        message: "Синхронизация завершена успешно",
-        updatedCount: result.updatedCount,
-        totalProcessed: result.totalProcessed,
-      });
-    } else {
-      res.status(500).json({
-        message: "Ошибка при синхронизации продуктов",
-        error: result.error,
-      });
-    }
-  } catch (err) {
-    console.error("Ошибка при синхронизации:", err);
-    res.status(500).json({ message: "Ошибка при синхронизации продуктов" });
   }
 });
 

@@ -2,7 +2,10 @@ import expressAsyncHandler from 'express-async-handler'
 import bcrypt from 'bcrypt'
 import User from '../models/User.js'
 import { generateToken } from '../utils.js'
-import { sendMail } from '../utils/mailer.js'
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from '../services/emailOutbox.js'
 import { welcomeEmailPL } from '../utils/templates/customerEmailTemplates.js'
 import Order from '../models/Order.js'
 import OrderOneClick from '../models/OrderOneClick.js'
@@ -214,7 +217,6 @@ export const signUp = expressAsyncHandler(async (req, res) => {
       email: req.body.email,
       password: bcrypt.hashSync(req.body.password, salt),
       name: req.body.name,
-      status: req.body.status,
       phone: req.body.phone,
       address: req.body.address,
       fop: req.body.fop,
@@ -222,19 +224,24 @@ export const signUp = expressAsyncHandler(async (req, res) => {
 
     const user = await newUser.save()
 
-    // Письмо — не блокируем ответ клиенту
+    // Письмо — не блокируем ответ клиенту; outbox retry if SMTP fails
     ;(async () => {
       try {
         const { subject, html, text } = welcomeEmailPL({ name: user.name })
-        await sendMail({
-          to: user.email,
-          subject,
-          html,
-          text,
-        })
+        const results = await queueEmailsAndAttempt([
+          {
+            kind: 'welcome-customer',
+            relatedId: String(user._id),
+            to: user.email,
+            subject,
+            html,
+            text,
+          },
+        ])
+        logEmailResults(results, `welcome ${user._id}`)
       } catch (mailErr) {
         console.error(
-          'Mail send error:',
+          '[Mailer] welcome queue failed:',
           mailErr?.response || mailErr?.message || mailErr,
         )
       }

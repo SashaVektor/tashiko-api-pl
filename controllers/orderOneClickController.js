@@ -1,21 +1,14 @@
 import expressAsyncHandler from "express-async-handler";
 import Order from "../models/OrderOneClick.js";
-import { adminEmailPL } from "../utils/templates/adminEmailTemplates.js";
-import { customerEmailPL } from "../utils/templates/customerEmailTemplates.js";
-import { getAdminNotificationEmail } from "../utils/getAdminNotificationEmail.js";
+import { sendOrderNotificationEmails } from "../services/orderNotifications.js";
 import {
-  logEmailResults,
-  queueEmailsAndAttempt,
-} from "../services/emailOutbox.js";
-import {
-  applyStockDelta,
+  assertStockAvailable,
   OrderValidationError,
   priceOrderItems,
   selectionsMatch,
 } from "../utils/orderPricing.js";
 
 export const createOrder = expressAsyncHandler(async (req, res) => {
-  let rollbackStock;
   try {
     const {
       name = "",
@@ -29,7 +22,7 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
       throw new OrderValidationError("Recipient name and phone are required");
     }
     const priced = await priceOrderItems([basketItem]);
-    rollbackStock = await applyStockDelta([], priced.items);
+    assertStockAvailable(priced.items);
 
     const newOrder = new Order({
       name,
@@ -43,52 +36,20 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
     });
 
     const order = await newOrder.save();
-    rollbackStock = undefined;
-
-    try {
-      const adminTo = await getAdminNotificationEmail();
-      const items = priced.items;
-
-      const messages = [];
-      if (email) {
-        const c = customerEmailPL({ name, phone, items, orderId: order._id });
-        messages.push({
-          kind: "one-click-order-customer",
-          relatedId: String(order._id),
-          to: email,
-          subject: c.subject,
-          html: c.html,
-          text: c.text,
-        });
-      }
-
-      if (adminTo) {
-        const a = adminEmailPL({ name, phone, items, orderId: order._id });
-        messages.push({
-          kind: "one-click-order-admin",
-          relatedId: String(order._id),
-          to: adminTo,
-          subject: a.subject,
-          html: a.html,
-          text: a.text,
-        });
-      } else {
-        console.warn(
-          "[Mailer] ADMIN_EMAIL is not configured",
-        );
-      }
-
-      const results = await queueEmailsAndAttempt(messages);
-      logEmailResults(results, `one-click order ${order._id}`);
-    } catch (mailErr) {
-      console.error("[Mailer] queueing failed:", mailErr);
-    }
 
     res
       .status(201)
       .send({ message: "Заказ успешно создан!", orderId: order._id, order });
+
+    sendOrderNotificationEmails({
+      kindPrefix: "one-click-order",
+      orderId: order._id,
+      name,
+      phone,
+      email,
+      items: priced.items,
+    });
   } catch (error) {
-    if (rollbackStock) await rollbackStock();
     if (error instanceof OrderValidationError) {
       return res.status(error.status).send({ message: error.message });
     }
@@ -98,7 +59,6 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
 });
 
 export const editOrder = expressAsyncHandler(async (req, res) => {
-  let rollbackStock;
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).send({ message: "Order not found" });
@@ -114,9 +74,13 @@ export const editOrder = expressAsyncHandler(async (req, res) => {
       });
     }
 
-    if (!order.isPaid && requestedItem) {
+    if (
+      !order.isPaid &&
+      requestedItem &&
+      !selectionsMatch([order.basketItem], [requestedItem])
+    ) {
       const priced = await priceOrderItems([requestedItem]);
-      rollbackStock = await applyStockDelta([order.basketItem], priced.items);
+      assertStockAvailable(priced.items);
       order.basketItem = priced.items[0];
       order.totalPrice = priced.totalPrice;
       order.totalQuantity = priced.totalQuantity;
@@ -139,10 +103,8 @@ export const editOrder = expressAsyncHandler(async (req, res) => {
     }
 
     await order.save();
-    rollbackStock = undefined;
     res.send({ message: "Order updated successfully", order });
   } catch (error) {
-    if (rollbackStock) await rollbackStock();
     if (error instanceof OrderValidationError) {
       return res.status(error.status).send({ message: error.message });
     }
@@ -165,6 +127,9 @@ export const getOrders = expressAsyncHandler(async (req, res) => {
 
 export const getUsersOrders = expressAsyncHandler(async (req, res) => {
   const { userId } = req.params;
+  if (req.user.status !== "adm" && req.user._id !== userId) {
+    return res.status(403).send({ message: "Forbidden" });
+  }
   try {
     const orders = await Order.find({ userId });
     res.send(orders);

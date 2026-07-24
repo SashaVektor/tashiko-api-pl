@@ -25,7 +25,7 @@ export const createSearchRegex = (value) =>
 export const buildProductFilter = ({ query, groupName }) => {
   const filter = { item_code: { $nin: [null, "", "item_code"] } };
 
-  if (groupName) filter.group_name = groupName;
+  if (groupName && typeof groupName === "string") filter.group_name = groupName;
 
   const normalizedQuery = normalizeSearchQuery(query);
   if (!normalizedQuery) return filter;

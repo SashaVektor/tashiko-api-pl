@@ -2,10 +2,8 @@
 import express from 'express'
 import querystring from 'querystring'
 import {
-  TPAY_BASE_URL,
   tpayGet,
   tpayPost,
-  rsaEncryptCardPlaintext,
   verifyTpayJwsSignature,
   verifyLegacyMd5,
 } from '../lib/tpay.js'
@@ -28,20 +26,37 @@ router.get('/channels', async (req, res) => {
 router.post('/transactions', async (req, res) => {
   try {
     const {
-      amount,
-      description,
       payer = {},
-      method = 'applepay',
+      method = 'cards',
       mode = 'redirect',
       extra = {},
-      hiddenDescription,
-      callbacks,
       orderId,
     } = req.body
+    const order = await Order.findById(orderId)
+    if (!order) return res.status(404).json({ error: 'Order not found' })
+    if (order.isPaid)
+      return res.status(409).json({ error: 'Order is already paid' })
+    if (
+      !Number.isFinite(order.totalPrice) ||
+      order.totalPrice <= 0 ||
+      order.basketItems.some((item) => item.currency !== 'PLN')
+    ) {
+      return res.status(422).json({ error: 'Order has invalid pricing' })
+    }
+    const callbackBaseUrl = process.env.PUBLIC_API_URL
+    if (!callbackBaseUrl) {
+      return res.status(503).json({ error: 'PUBLIC_API_URL is not configured' })
+    }
+    const description = `Order #${order._id}`
+    const callbacks = {
+      notification: {
+        url: `${callbackBaseUrl}/api/tpay/webhook/transactions?orderId=${order._id}`,
+      },
+    }
 
     // Базовый каркас
     const base = {
-      amount,
+      amount: Number(order.totalPrice.toFixed(2)),
       description,
       payer: {
         email: payer.email,
@@ -50,7 +65,7 @@ router.post('/transactions', async (req, res) => {
         ...(payer.userAgent ? { userAgent: payer.userAgent } : {}),
         ...(payer.phone ? { phone: payer.phone } : {}),
       },
-      ...(hiddenDescription ? { hiddenDescription } : {}),
+      hiddenDescription: String(order._id),
       ...(callbacks?.notification?.url ? { callbacks } : {}),
     }
 
@@ -83,6 +98,11 @@ router.post('/transactions', async (req, res) => {
 
     const createBody = { ...base, ...pay }
     const created = await tpayPost('/transactions', createBody) // :contentReference[oaicite:17]{index=17}
+    order.payment = {
+      provider: 'tpay',
+      invoiceId: created.data.transactionId,
+    }
+    await order.save()
 
     // Если on-site для карт — нужен второй шаг /pay (ожидание шифротекста карты)
     if (method === 'cards' && mode === 'onsite') {
@@ -174,37 +194,42 @@ router.get('/transactions/:id', async (req, res) => {
 // 4.6 Webhook ТРАНЗАКЦИЙ (нужно сырое тело для JWS)
 router.post(
   '/webhook/transactions',
-  express.raw({ type: '*/*' }),
   async (req, res) => {
     try {
-      const orderId = req.query.orderId
+      const rawBody = Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from(String(req.body || ''))
+      const form = querystring.parse(rawBody.toString('utf8'))
+      if (req.headers['x-jws-signature']) {
+        await verifyTpayJwsSignature(req, rawBody)
+      } else if (!verifyLegacyMd5(form)) {
+        throw new Error('Invalid Tpay webhook signature')
+      }
+      if (form.tr_status !== 'TRUE') return res.status(200).send('TRUE')
 
-      console.log('Order ID:', orderId)
-
+      const orderId = String(form.tr_crc || req.query.orderId || '')
       if (!orderId) {
-        console.error('Order ID is missing')
-        return res.status(400).send('FALSE')
+        throw new Error('Order ID is missing')
       }
-
-      // Находим заказ по ID и обновляем isPaid
-      const updatedOrder = await Order.findByIdAndUpdate(
-        orderId,
-        {
-          $set: {
-            isPaid: true,
-          },
-        },
-        { new: true },
+      const order = await Order.findById(orderId)
+      if (!order) throw new Error(`Order not found with ID: ${orderId}`)
+      if (
+        order.payment?.provider !== 'tpay' ||
+        String(order.payment?.invoiceId) !== String(form.tr_id || '')
+      ) {
+        throw new Error('Tpay transaction does not match the order')
+      }
+      const paidAmount = Number(
+        String(form.tr_amount || '').replace(',', '.'),
       )
-
-      if (!updatedOrder) {
-        console.error(`Order not found with ID: ${orderId}`)
-        return res.status(404).send('FALSE')
+      if (
+        !Number.isFinite(paidAmount) ||
+        Math.abs(paidAmount - order.totalPrice) > 0.009
+      ) {
+        throw new Error('Tpay amount does not match the order total')
       }
-
-      console.log(`Order ${orderId} marked as paid`)
-
-      // 6) Ответ строго 'TRUE'
+      order.isPaid = true
+      await order.save()
       return res.status(200).send('TRUE')
     } catch (e) {
       console.error('Webhook error', e)

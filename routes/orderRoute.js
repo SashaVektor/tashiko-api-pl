@@ -14,7 +14,7 @@ import { isAdmin, isAuth } from "../utils.js";
 const orderRouter = express.Router();
 
 orderRouter.post("/", createOrder);
-orderRouter.get("/user/:userId", getUsersOrders);
+orderRouter.get("/user/:userId", isAuth, getUsersOrders);
 orderRouter.get("/", isAuth, isAdmin, getOrders);
 orderRouter.put("/updateStatus/:id", isAuth, isAdmin, updateOrderStatus);
 orderRouter.put("/updatePayment/:id", isAuth, isAdmin, updateOrderPayment);

@@ -14,15 +14,47 @@ const parsePrice = (value) => {
       .replace(/\s/g, "")
       .replace(",", "."),
   );
-  if (!Number.isFinite(price) || price < 0) {
-    throw new OrderValidationError("Product has an invalid price");
+  if (!Number.isFinite(price) || price <= 0) {
+    throw new OrderValidationError("Product price is unavailable", 422);
   }
   return price;
 };
 
+const resolveProductPrice = (product) => {
+  const basePrice = parsePrice(product.price);
+  return {
+    basePrice,
+    baseCurrency: "PLN",
+    resolvedPrice: Number(basePrice.toFixed(2)),
+    resolvedCurrency: "PLN",
+  };
+};
+
+export const enrichProductsWithPricing = async (products) =>
+  products.map((product) => {
+    const plain =
+      typeof product?.toObject === "function" ? product.toObject() : product;
+    try {
+      const pricing = resolveProductPrice(plain);
+      return { ...plain, ...pricing, priceAvailable: plain.active !== false };
+    } catch {
+      return {
+        ...plain,
+        basePrice: null,
+        baseCurrency: "PLN",
+        resolvedPrice: null,
+        resolvedCurrency: "PLN",
+        priceAvailable: false,
+      };
+    }
+  });
+
 export const priceOrderItems = async (requestedItems) => {
   if (!Array.isArray(requestedItems) || requestedItems.length === 0) {
     throw new OrderValidationError("At least one product is required");
+  }
+  if (requestedItems.length > 100) {
+    throw new OrderValidationError("No more than 100 products are allowed");
   }
 
   const normalized = requestedItems.map((item) => {
@@ -42,9 +74,16 @@ export const priceOrderItems = async (requestedItems) => {
 
   const codes = [...new Set(normalized.map(({ productCode }) => productCode))];
   const products = await ProductFeed.find({ item_code: { $in: codes } }).lean();
-  const productsByCode = new Map(
-    products.map((product) => [product.item_code, product]),
-  );
+  const productsByCode = new Map();
+  for (const product of products) {
+    if (productsByCode.has(product.item_code)) {
+      throw new OrderValidationError(
+        `Duplicate product configuration for SKU ${product.item_code}`,
+        409,
+      );
+    }
+    productsByCode.set(product.item_code, product);
+  }
 
   const items = normalized.map(
     ({ id, requestedName, productCode, quantity }) => {
@@ -55,19 +94,26 @@ export const priceOrderItems = async (requestedItems) => {
           404,
         );
       }
+      if (product.active === false) {
+        throw new OrderValidationError(
+          `Product ${productCode} is unavailable`,
+          409,
+        );
+      }
 
       const allowedNames = [
         product.position_name,
         product.position_name_ukr,
       ].filter(Boolean);
+      const pricing = resolveProductPrice(product);
       return {
         _id: id || randomUUID(),
         productCode,
         name: allowedNames.includes(requestedName)
           ? requestedName
           : product.position_name_ukr || product.position_name || productCode,
-        price: Number(parsePrice(product.price).toFixed(2)),
-        currency: "PLN",
+        price: pricing.resolvedPrice,
+        currency: pricing.resolvedCurrency,
         imageLink: String(product.link_image || "")
           .split(",")[0]
           .trim(),
@@ -118,50 +164,4 @@ export const selectionsMatch = (currentItems, requestedItems) => {
     current.size === requested.size &&
     [...current].every(([code, quantity]) => requested.get(code) === quantity)
   );
-};
-
-export const applyStockDelta = async (oldItems, newItems) => {
-  const oldQuantities = quantitiesByCode(oldItems);
-  const newQuantities = quantitiesByCode(newItems);
-  const codes = new Set([...oldQuantities.keys(), ...newQuantities.keys()]);
-  const applied = [];
-
-  const rollback = async () => {
-    for (const { code, delta } of applied.reverse()) {
-      await ProductFeed.updateOne(
-        { item_code: code },
-        { $inc: { quantity: delta } },
-      );
-    }
-  };
-
-  try {
-    for (const code of codes) {
-      const delta =
-        (newQuantities.get(code) || 0) - (oldQuantities.get(code) || 0);
-      if (delta === 0) continue;
-
-      const filter =
-        delta > 0
-          ? { item_code: code, quantity: { $gte: delta } }
-          : { item_code: code };
-      const product = await ProductFeed.findOneAndUpdate(
-        filter,
-        { $inc: { quantity: -delta } },
-        { new: true },
-      );
-      if (!product) {
-        throw new OrderValidationError(
-          `Insufficient stock for product ${code}`,
-          409,
-        );
-      }
-      applied.push({ code, delta });
-    }
-  } catch (error) {
-    await rollback();
-    throw error;
-  }
-
-  return rollback;
 };

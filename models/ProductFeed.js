@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const productFeedSchema = new mongoose.Schema({
   source: { type: String, enum: ["ftp", "admin"], default: "ftp", index: true },
+  active: { type: Boolean, default: true, index: true },
   item_code: { type: String },
   position_name: { type: String },
   position_name_ukr: { type: String },
@@ -47,7 +48,7 @@ const productFeedSchema = new mongoose.Schema({
   value_characteristics13: { type: String },
   name_characteristics14: { type: String },
   value_characteristics14: { type: String },
-});
+}, { timestamps: true });
 
 const ProductFeed = mongoose.model("ProductFeed", productFeedSchema);
 

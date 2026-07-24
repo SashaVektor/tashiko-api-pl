@@ -50,38 +50,40 @@ export const createVIN = expressAsyncHandler(async (req, res) => {
         .send({ message: 'Nie udało się zapisać zapytania' })
     }
 
-    try {
-      const adminTo = await getAdminNotificationEmail()
-      if (adminTo) {
-        const { subject, html, textPlain } = vinAdminEmailPL({
-          requestId: saved._id,
-          phone: saved.phone,
-          vin: saved.vin,
-          text: saved.text,
-          photo: saved.photo,
-          userId: saved.userId,
-        })
-        const results = await queueEmailsAndAttempt([
-          {
-            kind: 'vin-admin',
-            relatedId: String(saved._id),
-            to: adminTo,
-            subject,
-            html,
-            text: textPlain,
-          },
-        ])
-        logEmailResults(results, `VIN request ${saved._id}`)
-      } else {
-        console.warn(
-          '[Mailer] ADMIN_EMAIL is not configured',
-        )
-      }
-    } catch (mailError) {
-      console.error('[VIN] Mail queueing failed:', mailError)
-    }
-
     res.status(200).send({ message: 'Запрос успешно отправлен!' })
+
+    ;(async () => {
+      try {
+        const adminTo = await getAdminNotificationEmail()
+        if (adminTo) {
+          const { subject, html, textPlain } = vinAdminEmailPL({
+            requestId: saved._id,
+            phone: saved.phone,
+            vin: saved.vin,
+            text: saved.text,
+            photo: saved.photo,
+            userId: saved.userId,
+          })
+          const results = await queueEmailsAndAttempt([
+            {
+              kind: 'vin-admin',
+              relatedId: String(saved._id),
+              to: adminTo,
+              subject,
+              html,
+              text: textPlain,
+            },
+          ])
+          logEmailResults(results, `VIN request ${saved._id}`)
+        } else {
+          console.warn(
+            '[Mailer] ADMIN_EMAIL is not configured',
+          )
+        }
+      } catch (mailError) {
+        console.error('[VIN] Mail queueing failed:', mailError)
+      }
+    })()
   } catch (err) {
     console.error(err)
 

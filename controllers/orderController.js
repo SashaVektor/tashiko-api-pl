@@ -1,14 +1,7 @@
 import expressAsyncHandler from "express-async-handler";
 import Order from "../models/Order.js";
-import { adminEmailPL } from "../utils/templates/adminEmailTemplates.js";
-import { customerEmailPL } from "../utils/templates/customerEmailTemplates.js";
-import { getAdminNotificationEmail } from "../utils/getAdminNotificationEmail.js";
+import { sendOrderNotificationEmails } from "../services/orderNotifications.js";
 import {
-  logEmailResults,
-  queueEmailsAndAttempt,
-} from "../services/emailOutbox.js";
-import {
-  applyStockDelta,
   assertStockAvailable,
   OrderValidationError,
   priceOrderItems,
@@ -16,7 +9,6 @@ import {
 } from "../utils/orderPricing.js";
 
 export const createOrder = expressAsyncHandler(async (req, res) => {
-  let rollbackStock;
   try {
     const {
       userId,
@@ -37,11 +29,7 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
     }
     const priced = await priceOrderItems(basketItems);
     const resolvedPaymentMethod = paymentMethod || "Оплата при получении";
-    if (resolvedPaymentMethod === "Оплата при получении") {
-      rollbackStock = await applyStockDelta([], priced.items);
-    } else {
-      assertStockAvailable(priced.items);
-    }
+    assertStockAvailable(priced.items);
 
     const newOrder = new Order({
       userId: userId || "",
@@ -64,12 +52,17 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
     });
 
     const order = await newOrder.save();
-    rollbackStock = undefined;
 
-    try {
-      const adminTo = await getAdminNotificationEmail();
-      const messages = [];
-      const details = {
+    res.status(201).send({ message: "Заказ успешно создан!", order });
+
+    sendOrderNotificationEmails({
+      kindPrefix: "regular-order",
+      orderId: order._id,
+      name: newOrder.userInfo.name,
+      phone: newOrder.userInfo.phone,
+      email,
+      items: priced.items,
+      details: {
         recipient: newOrder.userInfo.userDeliv,
         company: newOrder.userInfo.fop,
         deliveryMethod: newOrder.deliveryMethod,
@@ -81,57 +74,9 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
         totalPrice: newOrder.totalPrice,
         totalQuantity: newOrder.totalQuantity,
         currency: priced.items[0]?.currency || "PLN",
-      };
-
-      if (email) {
-        const c = customerEmailPL({
-          name: newOrder.userInfo.name,
-          phone: newOrder.userInfo.phone,
-          items: priced.items,
-          orderId: order._id,
-          details,
-        });
-        messages.push({
-          kind: "regular-order-customer",
-          relatedId: String(order._id),
-          to: email,
-          subject: c.subject,
-          html: c.html,
-          text: c.text,
-        });
-      }
-
-      if (adminTo) {
-        const a = adminEmailPL({
-          name: newOrder.userInfo.name,
-          phone: newOrder.userInfo.phone,
-          items: priced.items,
-          orderId: order._id,
-          details,
-        });
-        messages.push({
-          kind: "regular-order-admin",
-          relatedId: String(order._id),
-          to: adminTo,
-          subject: a.subject,
-          html: a.html,
-          text: a.text,
-        });
-      } else {
-        console.warn(
-          "[Mailer] ADMIN_EMAIL is not configured",
-        );
-      }
-
-      const results = await queueEmailsAndAttempt(messages);
-      logEmailResults(results, `regular order ${order._id}`);
-    } catch (mailErr) {
-      console.error("[Mailer] queueing failed:", mailErr);
-    }
-
-    res.status(201).send({ message: "Заказ успешно создан!", order });
+      },
+    });
   } catch (error) {
-    if (rollbackStock) await rollbackStock();
     if (error instanceof OrderValidationError) {
       return res.status(error.status).send({ message: error.message });
     }
@@ -141,7 +86,6 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
 });
 
 export const editOrder = expressAsyncHandler(async (req, res) => {
-  let rollbackStock;
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).send({ message: "Order not found" });
@@ -157,13 +101,13 @@ export const editOrder = expressAsyncHandler(async (req, res) => {
       });
     }
 
-    if (!order.isPaid && Array.isArray(requestedItems)) {
+    if (
+      !order.isPaid &&
+      Array.isArray(requestedItems) &&
+      !selectionsMatch(order.basketItems, requestedItems)
+    ) {
       const priced = await priceOrderItems(requestedItems);
-      if (order.paymentMethod === "Оплата при получении") {
-        rollbackStock = await applyStockDelta(order.basketItems, priced.items);
-      } else {
-        assertStockAvailable(priced.items);
-      }
+      assertStockAvailable(priced.items);
       order.basketItems = priced.items;
       order.totalPrice = priced.totalPrice;
       order.totalQuantity = priced.totalQuantity;
@@ -186,10 +130,8 @@ export const editOrder = expressAsyncHandler(async (req, res) => {
     }
 
     await order.save();
-    rollbackStock = undefined;
     res.send({ message: "Order updated successfully", order });
   } catch (error) {
-    if (rollbackStock) await rollbackStock();
     if (error instanceof OrderValidationError) {
       return res.status(error.status).send({ message: error.message });
     }
@@ -212,6 +154,9 @@ export const getOrders = expressAsyncHandler(async (req, res) => {
 
 export const getUsersOrders = expressAsyncHandler(async (req, res) => {
   const { userId } = req.params;
+  if (req.user.status !== "adm" && req.user._id !== userId) {
+    return res.status(403).send({ message: "Forbidden" });
+  }
   try {
     const orders = await Order.find({ userId });
     res.send(orders);
