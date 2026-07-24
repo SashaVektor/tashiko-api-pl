@@ -444,8 +444,52 @@ export const syncProductsFromFTP = async (trigger = "admin") => {
   }
 };
 
-export const getProductSyncHistory = (limit = 20) =>
-  ProductSyncRun.find()
-    .sort({ startedAt: -1 })
-    .limit(Math.min(Math.max(Number(limit) || 20, 1), 100))
-    .lean();
+const SYNC_HISTORY_SORT_FIELDS = new Set([
+  "startedAt",
+  "completedAt",
+  "fileModifiedAt",
+  "createdAt",
+]);
+const SYNC_HISTORY_STATUSES = new Set(["running", "completed", "failed"]);
+
+export const getProductSyncHistory = async ({
+  page = 1,
+  limit = 20,
+  sortBy = "startedAt",
+  sortOrder = "desc",
+  status,
+} = {}) => {
+  const parsedPage = Math.max(Number.parseInt(page, 10) || 1, 1);
+  const parsedLimit = Math.min(
+    Math.max(Number.parseInt(limit, 10) || 20, 1),
+    100,
+  );
+  const safeSortBy = SYNC_HISTORY_SORT_FIELDS.has(sortBy)
+    ? sortBy
+    : "startedAt";
+  const safeSortOrder = sortOrder === "asc" ? 1 : -1;
+  const filter = SYNC_HISTORY_STATUSES.has(status) ? { status } : {};
+
+  const [items, total] = await Promise.all([
+    ProductSyncRun.find(filter)
+      .sort({ [safeSortBy]: safeSortOrder, _id: safeSortOrder })
+      .skip((parsedPage - 1) * parsedLimit)
+      .limit(parsedLimit)
+      .lean(),
+    ProductSyncRun.countDocuments(filter),
+  ]);
+
+  return {
+    items,
+    pagination: {
+      page: parsedPage,
+      limit: parsedLimit,
+      total,
+      totalPages: Math.ceil(total / parsedLimit),
+    },
+    sort: {
+      sortBy: safeSortBy,
+      sortOrder: safeSortOrder === 1 ? "asc" : "desc",
+    },
+  };
+};

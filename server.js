@@ -91,7 +91,7 @@ app.get(
   isAuth,
   isAdmin,
   async (req, res) => {
-    res.send(await getProductSyncHistory(req.query.limit));
+    res.send(await getProductSyncHistory(req.query));
   },
 );
 app.get("/api/sync-products", isAuth, isAdmin, runProductSync("admin"));
