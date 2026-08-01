@@ -32,11 +32,11 @@ const orderSchema = new mongoose.Schema(
     },
     city: {
       type: String,
-      required: true,
+      default: "",
     },
     address: {
       type: String,
-      required: true,
+      default: "",
     },
     totalPrice: {
       type: Number,
