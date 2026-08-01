@@ -11,7 +11,6 @@ import orderOneClickRouter from "./routes/orderOneClickRoute.js";
 import orderRouter from "./routes/orderRoute.js";
 import locationRoute from "./routes/locationRoute.js";
 import userGarageRoute from "./routes/userGarageRoute.js";
-import monobankRoute from "./routes/monobankRoute.js";
 import productFeedRoute from "./routes/productFeedRoute.js";
 import statisticsRouter from "./routes/statisticsRoute.js";
 import dollarRateRoute from "./routes/dollarRateRoute.js";
@@ -28,7 +27,6 @@ import {
 import { processEmailOutbox } from "./services/emailOutbox.js";
 
 import tpayRouter from "./routes/tpayRouter.js";
-import paypalRouter from "./routes/paypalRoute.js";
 
 dotenv.config();
 mongoose
@@ -62,7 +60,6 @@ app.use("/api/statistics", statisticsRouter);
 
 app.use("/api/locations", locationRoute);
 app.use("/api/garage", userGarageRoute);
-app.use("/api/monobank", monobankRoute);
 app.use("/api/dollar-rate", dollarRateRoute);
 app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
@@ -118,7 +115,6 @@ app.get("/api/internal/process-email-outbox", async (req, res) => {
 });
 
 app.use("/api/tpay", tpayRouter);
-app.use("/api/paypal", paypalRouter);
 
 // async function syncPolishProducts() {
 //   try {
