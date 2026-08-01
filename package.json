@@ -8,6 +8,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
     "migrate:site-settings": "node migrations/20260721-seed-site-settings.js",
+    "migrate:social-links": "node migrations/20260801-seed-social-links.js",
+    "migrate:remove-ukrainian-locations": "node migrations/20260801-remove-ukrainian-locations.js",
     "migrate:product-source": "node migrations/20260722-set-product-source.js",
     "migrate:one-click-totals": "node migrations/20260723-backfill-one-click-totals.js",
     "migrate:pricing": "node migrations/20260724-pricing-and-product-index.js"

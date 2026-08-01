@@ -18,6 +18,7 @@ import dollarRateRoute from "./routes/dollarRateRoute.js";
 import contactRoute from "./routes/contactRoute.js";
 import siteSettingsRoute from "./routes/siteSettingsRoute.js";
 import pricingRoute from "./routes/pricingRoute.js";
+import exchangeRateRoute from "./routes/exchangeRateRoute.js";
 import { isAdmin, isAuth } from "./utils.js";
 import {
   getProductSyncHistory,
@@ -66,6 +67,7 @@ app.use("/api/dollar-rate", dollarRateRoute);
 app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
 app.use("/api/pricing", pricingRoute);
+app.use("/api/exchange-rates", exchangeRateRoute);
 
 const runProductSync = (trigger) => async (req, res) => {
   try {

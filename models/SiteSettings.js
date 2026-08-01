@@ -38,6 +38,16 @@ const contentBlockSchema = new mongoose.Schema(
   { _id: true },
 )
 
+const socialLinkSchema = new mongoose.Schema(
+  {
+    platform: { type: String, enum: ['instagram', 'youtube', 'viber', 'telegram', 'whatsapp', 'facebook'], required: true },
+    url: { type: String, trim: true, required: true },
+    enabled: { type: Boolean, default: true },
+    order: { type: Number, default: 0 },
+  },
+  { _id: true },
+)
+
 const siteSettingsSchema = new mongoose.Schema(
   {
     key: {
@@ -55,6 +65,7 @@ const siteSettingsSchema = new mongoose.Schema(
       title: { type: localizedTextSchema, default: () => ({}) },
       blocks: { type: [contentBlockSchema], default: [] },
     },
+    socialLinks: { type: [socialLinkSchema], default: [] },
   },
   { timestamps: true },
 )
