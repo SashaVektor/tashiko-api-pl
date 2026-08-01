@@ -23,9 +23,11 @@ export const getProductCatalog = async (req, res) => {
     } = req.query;
     const { page, limit, skip } = getPagination(pageValue, limitValue);
     const normalizedQuery = normalizeSearchQuery(q);
+    const normalizedCategory =
+      typeof category === "string" ? category.trim() : "";
     let filter = buildProductFilter({
       query: normalizedQuery,
-      groupName: category,
+      groupName: normalizedCategory,
     });
 
     if (normalizedQuery) {
@@ -44,8 +46,8 @@ export const getProductCatalog = async (req, res) => {
         const combinedSearch = {
           $or: [searchFilter, { item_code: { $in: crossCodes } }],
         };
-        filter = category
-          ? { $and: [{ group_name: category }, combinedSearch] }
+        filter = normalizedCategory
+          ? { $and: [{ group_name: normalizedCategory }, combinedSearch] }
           : combinedSearch;
       }
     }
