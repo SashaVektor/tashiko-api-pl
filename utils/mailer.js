@@ -22,6 +22,9 @@ function createTransporter() {
     port,
     secure,
     auth: { user, pass },
+    connectionTimeout: Number(process.env.EMAIL_CONNECTION_TIMEOUT_MS || 10000),
+    greetingTimeout: Number(process.env.EMAIL_GREETING_TIMEOUT_MS || 10000),
+    socketTimeout: Number(process.env.EMAIL_SOCKET_TIMEOUT_MS || 20000),
   })
 
   return { transporter, from }
@@ -29,11 +32,25 @@ function createTransporter() {
 
 export async function sendMail({ to, subject, html, text }) {
   const { transporter, from } = createTransporter()
-  return transporter.sendMail({
-    from,
-    to,
-    subject,
-    html: html || '',
-    text: text || '',
-  })
+  try {
+    return await transporter.sendMail({
+      from,
+      to,
+      subject,
+      html: html || '',
+      text: text || '',
+    })
+  } finally {
+    transporter.close()
+  }
+}
+
+export async function verifyMailConfiguration() {
+  const { transporter } = createTransporter()
+  try {
+    await transporter.verify()
+    return true
+  } finally {
+    transporter.close()
+  }
 }

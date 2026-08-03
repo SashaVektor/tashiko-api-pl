@@ -1,4 +1,4 @@
-import express from 'express'
+import express from "express";
 import {
   getProductFeed,
   getProductsFeed,
@@ -9,31 +9,36 @@ import {
   editProduct,
   getProductsByNumber,
   getProductsBrands,
-} from '../controllers/productFeedController.js'
+  getProductCatalog,
+  createProduct,
+} from "../controllers/productFeedController.js";
+import { isAdmin, isAuth } from "../utils.js";
 
-const productFeedRoute = express.Router()
+const productFeedRoute = express.Router();
 
-productFeedRoute.get('/', getProductsFeed)
+productFeedRoute.get("/", getProductsFeed);
 
-productFeedRoute.get('/brands/get-brands', getProductsBrands)
+productFeedRoute.get("/brands/get-brands", getProductsBrands);
 
-productFeedRoute.get('/:productCode', getProductFeed)
+productFeedRoute.get("/catalog/search", getProductCatalog);
 
-productFeedRoute.get('/search-number/:number', getProductsByNumber)
+productFeedRoute.get("/:productCode", getProductFeed);
 
-productFeedRoute.delete('/:id', removeProductFeed)
+productFeedRoute.get("/search-number/:number", getProductsByNumber);
 
-// productFeedRoute.post("/", createProduct);
+productFeedRoute.delete("/:id", isAuth, isAdmin, removeProductFeed);
 
-productFeedRoute.patch('/', editProduct)
+productFeedRoute.post("/", isAuth, isAdmin, createProduct);
 
-productFeedRoute.get('/productFeed/:groupName', getProductsFeedByGroup)
+productFeedRoute.patch("/", isAuth, isAdmin, editProduct);
+
+productFeedRoute.get("/productFeed/:groupName", getProductsFeedByGroup);
 
 productFeedRoute.get(
-  '/productFeed/limit/:groupName',
+  "/productFeed/limit/:groupName",
   getProductsFeedByGroupWithLimit,
-)
+);
 
-productFeedRoute.get('/search/productFeed', searchProductsFeed)
+productFeedRoute.get("/search/productFeed", searchProductsFeed);
 
-export default productFeedRoute
+export default productFeedRoute;

@@ -2,8 +2,184 @@ import expressAsyncHandler from 'express-async-handler'
 import bcrypt from 'bcrypt'
 import User from '../models/User.js'
 import { generateToken } from '../utils.js'
-import { sendMail } from '../utils/mailer.js'
-import { welcomeEmailPL } from '../utils/templates/welcome-pl.js'
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from '../services/emailOutbox.js'
+import { welcomeEmailPL } from '../utils/templates/customerEmailTemplates.js'
+import Order from '../models/Order.js'
+import OrderOneClick from '../models/OrderOneClick.js'
+
+const escapeRegExp = (value = '') =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+const regularOrdersCollection = Order.collection.name
+const oneClickOrdersCollection = OrderOneClick.collection.name
+
+export const getAdminCustomers = expressAsyncHandler(async (req, res) => {
+  const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
+  const limit = Math.min(
+    Math.max(Number.parseInt(req.query.limit, 10) || 20, 1),
+    100,
+  )
+  const query = String(req.query.q || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 100)
+  const orderFilter = ['with', 'without'].includes(req.query.orders)
+    ? req.query.orders
+    : 'all'
+  const sortOptions = {
+    newest: { createdAt: -1, _id: 1 },
+    oldest: { createdAt: 1, _id: 1 },
+    'name-asc': { name: 1, _id: 1 },
+    'name-desc': { name: -1, _id: 1 },
+    'orders-desc': { orderCount: -1, createdAt: -1 },
+    'orders-asc': { orderCount: 1, createdAt: -1 },
+  }
+  const sort = sortOptions[req.query.sort] || sortOptions.newest
+  const filter = { status: { $ne: 'adm' } }
+  if (query) {
+    const regex = new RegExp(escapeRegExp(query), 'i')
+    filter.$or = [
+      { name: regex },
+      { email: regex },
+      { phone: regex },
+      { fop: regex },
+    ]
+  }
+  const orderCountMatch =
+    orderFilter === 'with'
+      ? { orderCount: { $gt: 0 } }
+      : orderFilter === 'without'
+        ? { orderCount: 0 }
+        : {}
+  const [result] = await User.aggregate([
+    { $match: filter },
+    {
+      $lookup: {
+        from: regularOrdersCollection,
+        let: { customerId: { $toString: '$_id' } },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$userId', '$$customerId'] } } },
+          { $count: 'count' },
+        ],
+        as: 'regularOrderStats',
+      },
+    },
+    {
+      $lookup: {
+        from: oneClickOrdersCollection,
+        let: { customerId: { $toString: '$_id' } },
+        pipeline: [
+          { $match: { $expr: { $eq: ['$userId', '$$customerId'] } } },
+          { $count: 'count' },
+        ],
+        as: 'oneClickOrderStats',
+      },
+    },
+    {
+      $addFields: {
+        orderCount: {
+          $add: [
+            { $ifNull: [{ $first: '$regularOrderStats.count' }, 0] },
+            { $ifNull: [{ $first: '$oneClickOrderStats.count' }, 0] },
+          ],
+        },
+      },
+    },
+    { $match: orderCountMatch },
+    {
+      $project: {
+        name: 1,
+        email: 1,
+        phone: 1,
+        address: 1,
+        fop: 1,
+        status: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        orderCount: 1,
+      },
+    },
+    {
+      $facet: {
+        customers: [
+          { $sort: sort },
+          { $skip: (page - 1) * limit },
+          { $limit: limit },
+        ],
+        total: [{ $count: 'count' }],
+      },
+    },
+  ]).collation({ locale: 'pl', strength: 1 })
+  const customers = result.customers
+  const totalCustomers = result.total[0]?.count || 0
+  res.json({
+    customers,
+    totalCustomers,
+    page,
+    limit,
+    totalPages: Math.ceil(totalCustomers / limit),
+  })
+})
+
+export const getAdminCustomerProfile = expressAsyncHandler(async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+  const customer = await User.findById(req.params.id).select(
+    'name email phone address fop status createdAt updatedAt',
+  )
+  if (!customer || customer.status === 'adm') {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+  const regularPage = Math.max(
+    Number.parseInt(req.query.regularPage, 10) || 1,
+    1,
+  )
+  const oneClickPage = Math.max(
+    Number.parseInt(req.query.oneClickPage, 10) || 1,
+    1,
+  )
+  const limit = Math.min(
+    Math.max(Number.parseInt(req.query.limit, 10) || 10, 1),
+    100,
+  )
+  const filter = { userId: String(customer._id) }
+  const [
+    regularOrders,
+    totalRegularOrders,
+    oneClickOrders,
+    totalOneClickOrders,
+  ] = await Promise.all([
+    Order.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((regularPage - 1) * limit)
+      .limit(limit),
+    Order.countDocuments(filter),
+    OrderOneClick.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip((oneClickPage - 1) * limit)
+      .limit(limit),
+    OrderOneClick.countDocuments(filter),
+  ])
+
+  res.json({
+    customer,
+    regularOrders,
+    oneClickOrders,
+    totalOrders: totalRegularOrders + totalOneClickOrders,
+    totalRegularOrders,
+    totalOneClickOrders,
+    regularPage,
+    oneClickPage,
+    limit,
+    regularTotalPages: Math.ceil(totalRegularOrders / limit),
+    oneClickTotalPages: Math.ceil(totalOneClickOrders / limit),
+  })
+})
 
 export const signIn = expressAsyncHandler(async (req, res) => {
   try {
@@ -41,7 +217,6 @@ export const signUp = expressAsyncHandler(async (req, res) => {
       email: req.body.email,
       password: bcrypt.hashSync(req.body.password, salt),
       name: req.body.name,
-      status: req.body.status,
       phone: req.body.phone,
       address: req.body.address,
       fop: req.body.fop,
@@ -49,19 +224,24 @@ export const signUp = expressAsyncHandler(async (req, res) => {
 
     const user = await newUser.save()
 
-    // Письмо — не блокируем ответ клиенту
+    // Письмо — не блокируем ответ клиенту; outbox retry if SMTP fails
     ;(async () => {
       try {
         const { subject, html, text } = welcomeEmailPL({ name: user.name })
-        await sendMail({
-          to: user.email,
-          subject,
-          html,
-          text,
-        })
+        const results = await queueEmailsAndAttempt([
+          {
+            kind: 'welcome-customer',
+            relatedId: String(user._id),
+            to: user.email,
+            subject,
+            html,
+            text,
+          },
+        ])
+        logEmailResults(results, `welcome ${user._id}`)
       } catch (mailErr) {
         console.error(
-          'Mail send error:',
+          '[Mailer] welcome queue failed:',
           mailErr?.response || mailErr?.message || mailErr,
         )
       }

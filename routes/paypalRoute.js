@@ -1,6 +1,7 @@
 // /routes/paypalRoute.js
 import express from 'express'
 import axios from 'axios'
+import Order from '../models/Order.js'
 
 const router = express.Router()
 
@@ -28,7 +29,17 @@ async function paypalToken() {
 
 router.post('/orders', async (req, res) => {
   try {
-    const { amount, currency = 'PLN', description } = req.body
+    const order = await Order.findById(req.body.orderId)
+    if (!order) return res.status(404).json({ error: 'Order not found' })
+    if (order.isPaid)
+      return res.status(409).json({ error: 'Order is already paid' })
+    if (
+      !Number.isFinite(order.totalPrice) ||
+      order.totalPrice <= 0 ||
+      order.basketItems.some((item) => item.currency !== 'PLN')
+    ) {
+      return res.status(422).json({ error: 'Order has invalid pricing' })
+    }
     const token = await paypalToken()
     const resp = await axios.post(
       `${base()}/v2/checkout/orders`,
@@ -36,13 +47,18 @@ router.post('/orders', async (req, res) => {
         intent: 'CAPTURE',
         purchase_units: [
           {
-            amount: { value: String(amount), currency_code: currency },
-            description,
+            amount: {
+              value: order.totalPrice.toFixed(2),
+              currency_code: 'PLN',
+            },
+            description: `Order #${order._id}`,
           },
         ],
       },
       { headers: { Authorization: `Bearer ${token}` } },
     )
+    order.payment = { provider: 'paypal', invoiceId: resp.data.id }
+    await order.save()
     res.json(resp.data)
   } catch (e) {
     res.status(500).json({ error: e.response?.data || e.message })
@@ -51,6 +67,11 @@ router.post('/orders', async (req, res) => {
 
 router.post('/orders/:id/capture', async (req, res) => {
   try {
+    const order = await Order.findOne({
+      'payment.provider': 'paypal',
+      'payment.invoiceId': req.params.id,
+    })
+    if (!order) return res.status(404).json({ error: 'Order not found' })
     const token = await paypalToken()
     const resp = await axios.post(
       `${base()}/v2/checkout/orders/${req.params.id}/capture`,
@@ -59,6 +80,10 @@ router.post('/orders/:id/capture', async (req, res) => {
         headers: { Authorization: `Bearer ${token}` },
       },
     )
+    if (resp.data.status === 'COMPLETED') {
+      order.isPaid = true
+      await order.save()
+    }
     res.json(resp.data)
   } catch (e) {
     res.status(500).json({ error: e.response?.data || e.message })

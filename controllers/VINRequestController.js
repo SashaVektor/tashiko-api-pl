@@ -1,7 +1,11 @@
 import expressAsyncHandler from 'express-async-handler'
 import VINRequest from '../models/VINRequest.js'
-import { sendMail } from '../utils/mailer.js'
-import { vinAdminEmailPL } from '../utils/templates/emailTemplates.js'
+import { vinAdminEmailPL } from '../utils/templates/adminEmailTemplates.js'
+import { getAdminNotificationEmail } from '../utils/getAdminNotificationEmail.js'
+import {
+  logEmailResults,
+  queueEmailsAndAttempt,
+} from '../services/emailOutbox.js'
 
 export const getVIN = expressAsyncHandler(async (req, res) => {
   try {
@@ -46,22 +50,40 @@ export const createVIN = expressAsyncHandler(async (req, res) => {
         .send({ message: 'Nie udało się zapisać zapytania' })
     }
 
-    // Отдаём ответ клиенту один раз
     res.status(200).send({ message: 'Запрос успешно отправлен!' })
 
-    const adminTo = process.env.ADMIN_EMAIL || 'admin@tashiko.pl'
-    const { subject, html, textPlain } = vinAdminEmailPL({
-      requestId: saved._id,
-      phone: saved.phone,
-      vin: saved.vin,
-      text: saved.text,
-      photo: saved.photo,
-      userId: saved.userId,
-    })
-
-    sendMail({ to: adminTo, subject, html, text: textPlain }).catch((e) =>
-      console.error('[VIN] Mail send error:', e?.response || e?.message || e),
-    )
+    ;(async () => {
+      try {
+        const adminTo = await getAdminNotificationEmail()
+        if (adminTo) {
+          const { subject, html, textPlain } = vinAdminEmailPL({
+            requestId: saved._id,
+            phone: saved.phone,
+            vin: saved.vin,
+            text: saved.text,
+            photo: saved.photo,
+            userId: saved.userId,
+          })
+          const results = await queueEmailsAndAttempt([
+            {
+              kind: 'vin-admin',
+              relatedId: String(saved._id),
+              to: adminTo,
+              subject,
+              html,
+              text: textPlain,
+            },
+          ])
+          logEmailResults(results, `VIN request ${saved._id}`)
+        } else {
+          console.warn(
+            '[Mailer] ADMIN_EMAIL is not configured',
+          )
+        }
+      } catch (mailError) {
+        console.error('[VIN] Mail queueing failed:', mailError)
+      }
+    })()
   } catch (err) {
     console.error(err)
 

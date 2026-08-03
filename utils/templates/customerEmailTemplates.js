@@ -1,40 +1,98 @@
-// utils/templates/welcome-pl.js
+import { renderItemsTable } from './itemsTable.js'
+import { escapeHtml, sanitizeHeaderValue } from './escapeHtml.js'
+import { renderOrderDetails } from './orderDetails.js'
 
-// Paleta z Twojego Tailwinda
+const orderDetailLabels = {
+  recipient: 'Odbiorca',
+  company: 'Firma',
+  deliveryMethod: 'Sposób dostawy',
+  city: 'Miasto',
+  address: 'Adres / punkt odbioru',
+  paymentMethod: 'Sposób płatności',
+  paymentStatus: 'Status płatności',
+  paymentPaid: 'Opłacono',
+  paymentUnpaid: 'Nie opłacono',
+  comment: 'Komentarz',
+  total: 'Razem',
+  quantity: 'Łączna liczba sztuk',
+}
+
+export function customerEmailPL({ name, phone, items, orderId, details }) {
+  const itemsTable = renderItemsTable(items)
+  const orderDetails = renderOrderDetails(details, orderDetailLabels)
+  const safeName = escapeHtml(name)
+  const safePhone = escapeHtml(phone)
+  const safeOrderId = escapeHtml(orderId)
+  return {
+    subject: `Dziękujemy za zamówienie, ${sanitizeHeaderValue(name)}!`,
+    html: `
+      <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;background:#ffffff;padding:20px">
+        <h2 style="margin:0 0 10px;color:#121212">Tashiko PL — potwierdzenie zamówienia</h2>
+        <p style="margin:0 0 12px;color:#5F6B6D">Otrzymaliśmy Twoje zamówienie i wkrótce się z Tobą skontaktujemy.</p>
+
+        <div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;padding:14px;margin:16px 0">
+          <p style="margin:0;color:#303637"><b>Numer zamówienia:</b> ${safeOrderId}</p>
+          <p style="margin:6px 0 0;color:#303637"><b>Imię:</b> ${safeName}</p>
+          <p style="margin:6px 0 0;color:#303637"><b>Telefon:</b> ${safePhone}</p>
+        </div>
+
+        ${
+          orderDetails.html
+            ? `<table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin:8px 0 16px">
+                 <tbody>${orderDetails.html}</tbody>
+               </table>`
+            : ''
+        }
+
+        <table cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr style="background:#AEBEFA;color:#121212">
+              <th style="text-align:left;padding:10px">Zdjęcie</th>
+              <th style="text-align:left;padding:10px">Produkt</th>
+              <th style="text-align:left;padding:10px">Kod produktu</th>
+              <th style="text-align:left;padding:10px">Cena</th>
+              <th style="text-align:left;padding:10px">Ilość</th>
+            </tr>
+          </thead>
+          <tbody>${itemsTable}</tbody>
+        </table>
+
+        <p style="margin:18px 0 0;color:#5F6B6D">Jeśli masz pytania, po prostu odpowiedz na tę wiadomość.</p>
+        <p style="margin:4px 0 0;color:#ADB6B8;font-size:12px">© Tashiko PL</p>
+      </div>
+    `,
+    text: `Dziękujemy za zamówienie, ${name}! Numer zamówienia: ${orderId}. Skontaktujemy się wkrótce.${orderDetails.text ? `\n${orderDetails.text}` : ''}`,
+  }
+}
+
 const colors = {
   lightBlue: '#AEBEFA',
   red: '#BB170E',
-  orange: '#FFB303', // w Twojej palecie było "orage" — tu traktujemy jako orange
+  orange: '#FFB303',
   darkGray: '#303637',
   mediumGray: '#5F6B6D',
   lightGray: '#ADB6B8',
   background: '#121212',
 }
 
-/**
- * Powitalny e-mail dla sklepu Tashiko PL
- * @param {{ name?: string }} params
- * @returns {{ subject: string, html: string, text: string }}
- */
 export function welcomeEmailPL({ name = '' }) {
   const brand = 'Tashiko PL'
-  const siteUrl = 'https://tashiko.pl' // jeśli inny, podmień tutaj
+  const siteUrl = 'https://tashiko.pl'
 
-  const safeName = name?.trim() ? name.trim() : 'Kliencie'
+  const displayName = name?.trim() ? name.trim() : 'Kliencie'
+  const safeName = escapeHtml(displayName)
 
   const subject = `Witamy w ${brand} — Twoje konto zostało utworzone`
   const preheader = `Dziękujemy za rejestrację w ${brand}. Sprawdź, jak szybciej znaleźć odpowiednie części do swojego auta.`
 
-  // Wersja tekstowa (fallback)
   const text = [
-    `Cześć ${safeName},`,
+    `Cześć ${displayName},`,
     `Dziękujemy za rejestrację w ${brand}. Twoje konto zostało pomyślnie utworzone.`,
     `Od teraz możesz przeglądać ofertę, zapisywać koszyki, śledzić zamówienia i szybciej finalizować zakupy.`,
     `Jeśli nie zakładałeś/zakładałaś konta, odpowiedz na tę wiadomość, a nasz zespół to sprawdzi.`,
     `Wejdź na ${siteUrl} i rozpocznij zakupy.`,
   ].join('\n')
 
-  // Wersja HTML (styling pod e-maile)
   const html = `
   <!doctype html>
   <html lang="pl">
@@ -52,7 +110,6 @@ export function welcomeEmailPL({ name = '' }) {
     </style>
   </head>
   <body style="background:${colors.background};">
-    <!-- Preheader -->
     <div style="display:none;max-height:0;overflow:hidden;color:transparent;opacity:0;">
       ${preheader}
     </div>
@@ -65,7 +122,6 @@ export function welcomeEmailPL({ name = '' }) {
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:92%;background:#000;border:1px solid ${
             colors.darkGray
           };border-radius:12px;overflow:hidden;">
-            <!-- Header -->
             <tr>
               <td style="padding:20px 24px;background:#0B0B0B;border-bottom:1px solid ${
                 colors.darkGray
@@ -81,7 +137,6 @@ export function welcomeEmailPL({ name = '' }) {
               </td>
             </tr>
 
-            <!-- Body -->
             <tr>
               <td style="padding:28px 24px 8px 24px;">
                 <div style="font-family:Inter,Arial,sans-serif;color:#fff;font-size:20px;font-weight:700;margin-bottom:8px;">
@@ -146,7 +201,6 @@ export function welcomeEmailPL({ name = '' }) {
               </td>
             </tr>
 
-            <!-- Footer -->
             <tr>
               <td style="padding:16px 24px;background:#0B0B0B;border-top:1px solid ${
                 colors.darkGray

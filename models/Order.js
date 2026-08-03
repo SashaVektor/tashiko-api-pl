@@ -57,6 +57,10 @@ const orderSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    payment: {
+      provider: { type: String, default: "" },
+      invoiceId: { type: String, default: "" },
+    },
     basketItems: [{
       _id: {
         type: String,
