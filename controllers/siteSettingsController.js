@@ -12,6 +12,7 @@ const emptySettings = {
     title: { ua: '', ru: '', pl: '' },
     blocks: [],
   },
+  socialLinks: [],
 }
 
 const toPublicSettings = (settings) => {
@@ -20,10 +21,11 @@ const toPublicSettings = (settings) => {
   return publicSettings
 }
 
-const editableFields = ({ contacts, workingHours, delivery }) => ({
+const editableFields = ({ contacts, workingHours, delivery, socialLinks }) => ({
   contacts,
   workingHours,
   delivery,
+  socialLinks,
 })
 
 export const getSiteSettings = expressAsyncHandler(async (_req, res) => {

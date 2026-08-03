@@ -11,13 +11,13 @@ import orderOneClickRouter from "./routes/orderOneClickRoute.js";
 import orderRouter from "./routes/orderRoute.js";
 import locationRoute from "./routes/locationRoute.js";
 import userGarageRoute from "./routes/userGarageRoute.js";
-import monobankRoute from "./routes/monobankRoute.js";
 import productFeedRoute from "./routes/productFeedRoute.js";
 import statisticsRouter from "./routes/statisticsRoute.js";
 import dollarRateRoute from "./routes/dollarRateRoute.js";
 import contactRoute from "./routes/contactRoute.js";
 import siteSettingsRoute from "./routes/siteSettingsRoute.js";
 import pricingRoute from "./routes/pricingRoute.js";
+import exchangeRateRoute from "./routes/exchangeRateRoute.js";
 import { isAdmin, isAuth } from "./utils.js";
 import {
   getProductSyncHistory,
@@ -27,7 +27,6 @@ import {
 import { processEmailOutbox } from "./services/emailOutbox.js";
 
 import tpayRouter from "./routes/tpayRouter.js";
-import paypalRouter from "./routes/paypalRoute.js";
 
 dotenv.config();
 mongoose
@@ -61,11 +60,11 @@ app.use("/api/statistics", statisticsRouter);
 
 app.use("/api/locations", locationRoute);
 app.use("/api/garage", userGarageRoute);
-app.use("/api/monobank", monobankRoute);
 app.use("/api/dollar-rate", dollarRateRoute);
 app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
 app.use("/api/pricing", pricingRoute);
+app.use("/api/exchange-rates", exchangeRateRoute);
 
 const runProductSync = (trigger) => async (req, res) => {
   try {
@@ -116,7 +115,6 @@ app.get("/api/internal/process-email-outbox", async (req, res) => {
 });
 
 app.use("/api/tpay", tpayRouter);
-app.use("/api/paypal", paypalRouter);
 
 // async function syncPolishProducts() {
 //   try {

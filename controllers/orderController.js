@@ -154,11 +154,14 @@ export const getOrders = expressAsyncHandler(async (req, res) => {
 
 export const getUsersOrders = expressAsyncHandler(async (req, res) => {
   const { userId } = req.params;
-  if (req.user.status !== "adm" && req.user._id !== userId) {
+  const authenticatedUserId = req.user._id.toString();
+  const requestedUserId = userId.toString();
+
+  if (req.user.status !== "adm" && authenticatedUserId !== requestedUserId) {
     return res.status(403).send({ message: "Forbidden" });
   }
   try {
-    const orders = await Order.find({ userId });
+    const orders = await Order.find({ userId: requestedUserId });
     res.send(orders);
   } catch (err) {
     console.log(err);

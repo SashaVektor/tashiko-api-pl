@@ -33,39 +33,34 @@ const settings = {
     pl: 'Pn-Pt 09:00-17:00\nSb 09:00-15:00',
   },
   delivery: {
-    title: { ua: '', ru: '', pl: 'Dostawa' },
+    title: { ua: '', ru: '', pl: 'Dostawa, gwarancja i zwrot' },
     blocks: [
       {
-        title: { ua: '', ru: '', pl: '' },
-        content: {
-          ua: '',
-          ru: '',
-          pl: 'Zamówienia złożone do godziny 14:00 są wysyłane tego samego dnia.',
-        },
+        title: { ua: '', ru: '', pl: 'Dostawa' },
+        content: { ua: '', ru: '', pl: 'Zamówienia złożone do godz. 14:00 wysyłamy tego samego dnia roboczego.\nZamówienia po godz. 14:00 wysyłamy następnego dnia roboczego.\nWysyłka realizowana przez InPost i DPD.\nKoszt i czas dostawy widoczne są w koszyku przed złożeniem zamówienia.\nPo nadaniu przesyłki otrzymasz numer śledzenia.' },
         enabled: true,
         order: 0,
         languages: ['pl'],
       },
       {
-        title: { ua: '', ru: '', pl: '' },
-        content: {
-          ua: '',
-          ru: '',
-          pl: 'Zamówienia złożone po godzinie 14:00 są wysyłane następnego dnia roboczego.',
-        },
+        title: { ua: '', ru: '', pl: 'Gwarancja' },
+        content: { ua: '', ru: '', pl: 'Wszystkie produkty Tashiko są nowe i objęte 12-miesięczną gwarancją producenta.\nWarunkiem zachowania gwarancji jest montaż przez autoryzowany warsztat lub wykwalifikowanego mechanika.\nReklamacje przyjmujemy mailowo: tashiko.polska@gmail.com.\nCzas rozpatrzenia reklamacji: do 14 dni roboczych.' },
         enabled: true,
         order: 1,
         languages: ['pl'],
       },
       {
-        title: { ua: '', ru: '', pl: '' },
-        content: {
-          ua: '',
-          ru: '',
-          pl: 'Wysyłka jest możliwa za pośrednictwem wszystkich dostępnych firm kurierskich.',
-        },
+        title: { ua: '', ru: '', pl: 'Zwroty i wymiana' },
+        content: { ua: '', ru: '', pl: 'Masz 14 dni na zwrot produktu zakupionego online – bez podawania przyczyny.\nTowar musi być kompletny, nieużywany i bez śladów montażu.\nProsimy o odesłanie w oryginalnym, nieuszkodzonym opakowaniu.\nKoszt wysyłki pokrywa Klient (z wyjątkiem reklamacji).\nAdres do zwrotów: TASHIKO Sp. z o.o. ul. Tęczowa 25, 53-601 Wrocław.' },
         enabled: true,
         order: 2,
+        languages: ['pl'],
+      },
+      {
+        title: { ua: '', ru: '', pl: 'Ważne' },
+        content: { ua: '', ru: '', pl: 'W razie wątpliwości przed montażem lub zwrotem prosimy o kontakt:\n📧 tashiko.polska@gmail.com | ☎️ +48 452 428 487\nKażdy przypadek błędnego doboru części rozpatrujemy indywidualnie.' },
+        enabled: true,
+        order: 3,
         languages: ['pl'],
       },
     ],
