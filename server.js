@@ -18,6 +18,7 @@ import contactRoute from "./routes/contactRoute.js";
 import siteSettingsRoute from "./routes/siteSettingsRoute.js";
 import pricingRoute from "./routes/pricingRoute.js";
 import exchangeRateRoute from "./routes/exchangeRateRoute.js";
+import crossNumbersRoute from "./routes/crossNumbersRoute.js";
 import { isAdmin, isAuth } from "./utils.js";
 import {
   getProductSyncHistory,
@@ -65,6 +66,7 @@ app.use("/api/contact", contactRoute);
 app.use("/api/site-settings", siteSettingsRoute);
 app.use("/api/pricing", pricingRoute);
 app.use("/api/exchange-rates", exchangeRateRoute);
+app.use("/api/cross-numbers", crossNumbersRoute);
 
 const runProductSync = (trigger) => async (req, res) => {
   try {
