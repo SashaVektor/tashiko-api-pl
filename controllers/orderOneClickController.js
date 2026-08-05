@@ -1,5 +1,7 @@
 import expressAsyncHandler from "express-async-handler";
 import Order from "../models/OrderOneClick.js";
+import OrderStatus from "../models/OrderStatus.js";
+import PaymentStatus from "../models/PaymentStatus.js";
 import { sendOrderNotificationEmails } from "../services/orderNotifications.js";
 import {
   assertStockAvailable,
@@ -24,6 +26,11 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
     const priced = await priceOrderItems([basketItem]);
     assertStockAvailable(priced.items);
 
+    const [defaultStatus, defaultPaymentStatus] = await Promise.all([
+      OrderStatus.findOne({ isDefault: true }),
+      PaymentStatus.findOne({ isDefault: true }),
+    ]);
+
     const newOrder = new Order({
       name,
       phone,
@@ -31,8 +38,9 @@ export const createOrder = expressAsyncHandler(async (req, res) => {
       basketItem: priced.items[0],
       totalPrice: priced.totalPrice,
       totalQuantity: priced.totalQuantity,
-      isPaid: false,
-      status: "Принято",
+      isPaid: defaultPaymentStatus?.countsAsPaid || false,
+      paymentStatus: defaultPaymentStatus?.name || "Не оплачено",
+      status: defaultStatus?.name || "Принято",
     });
 
     const order = await newOrder.save();
@@ -157,9 +165,14 @@ export const getOrderById = expressAsyncHandler(async (req, res) => {
 export const updateOrderStatus = expressAsyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
+    const name = String(req.body.status || "").trim();
+    const matched = await OrderStatus.findOne({ name });
+    if (!matched) {
+      return res.status(400).send({ message: "Unknown order status" });
+    }
     const order = await Order.findOne({ _id: id });
     if (order) {
-      order.status = req.body.status;
+      order.status = matched.name;
       await order.save();
       res.send({ message: "Статус запроса обновлён!" });
     } else {
@@ -174,9 +187,15 @@ export const updateOrderStatus = expressAsyncHandler(async (req, res) => {
 export const updateOrderPayment = expressAsyncHandler(async (req, res) => {
   try {
     const { id } = req.params;
+    const name = String(req.body.paymentStatus || "").trim();
+    const matched = await PaymentStatus.findOne({ name });
+    if (!matched) {
+      return res.status(400).send({ message: "Unknown payment status" });
+    }
     const order = await Order.findOne({ _id: id });
     if (order) {
-      order.isPaid = req.body.payStatus === "Оплачено";
+      order.paymentStatus = matched.name;
+      order.isPaid = matched.countsAsPaid;
       await order.save();
       res.send({ message: "Статус успішно змінено!" });
     } else {

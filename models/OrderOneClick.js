@@ -14,6 +14,9 @@ const orderOneClickSchema = new mongoose.Schema(
       type: Boolean,
       required: true,
     },
+    paymentStatus: {
+      type: String,
+    },
     status: {
       type: String,
       required: true,

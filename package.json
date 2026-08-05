@@ -13,7 +13,8 @@
     "migrate:remove-ukrainian-locations": "node migrations/20260801-remove-ukrainian-locations.js",
     "migrate:product-source": "node migrations/20260722-set-product-source.js",
     "migrate:one-click-totals": "node migrations/20260723-backfill-one-click-totals.js",
-    "migrate:pricing": "node migrations/20260724-pricing-and-product-index.js"
+    "migrate:pricing": "node migrations/20260724-pricing-and-product-index.js",
+    "migrate:order-payment-statuses": "node migrations/20260805-seed-order-payment-statuses.js"
   },
   "keywords": [],
   "author": "",

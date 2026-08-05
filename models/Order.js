@@ -53,6 +53,9 @@ const orderSchema = new mongoose.Schema(
       type: Boolean,
       required: true,
     },
+    paymentStatus: {
+      type: String,
+    },
     status: {
       type: String,
       required: true,
