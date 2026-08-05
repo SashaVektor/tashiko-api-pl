@@ -33,13 +33,14 @@ const validateRow = (row, lineNumber) => {
   const positionName = String(row.position_name || "").trim();
   const rawQuantity = String(row.quantity ?? "").trim();
   const rawPrice = String(row.price ?? "").trim();
-  const quantity = normalizeNumber(row.quantity);
+  const parsedQuantity = normalizeNumber(row.quantity);
+  const quantity = Math.floor(parsedQuantity);
   const price = normalizeNumber(row.price);
 
   let reason = "";
   if (!itemCode) reason = "missing_sku";
   else if (!positionName) reason = "missing_name";
-  else if (!Number.isInteger(quantity) || quantity < 0) {
+  else if (!Number.isFinite(parsedQuantity) || parsedQuantity < 0) {
     reason = "invalid_quantity";
   } else if (!Number.isFinite(price) || price < 0) {
     reason = "invalid_price";
