@@ -1,4 +1,5 @@
 import expressAsyncHandler from "express-async-handler";
+import mongoose from "mongoose";
 import ProductFeed from "../models/ProductFeed.js";
 import CrossNumbers from "../models/CrossNumbers.js";
 import {
@@ -10,6 +11,11 @@ import {
   normalizeSearchQuery,
 } from "../utils/productQuery.js";
 import { enrichProductsWithPricing } from "../utils/orderPricing.js";
+import {
+  buildImportTemplateWorkbook,
+  buildProductsWorkbook,
+  importProductsFromFile,
+} from "../utils/productImportExport.js";
 
 export const getProductCatalog = async (req, res) => {
   try {
@@ -324,11 +330,8 @@ export const getProductsByNumber = async (req, res) => {
 const ADMIN_PRODUCT_FIELDS = [
   "active",
   "position_name",
-  "position_name_ukr",
   "search_queries",
-  "search_queries_ukr",
   "description",
-  "description_ukr",
   "product_type",
   "currency",
   "unit_of_measurement",
@@ -457,6 +460,62 @@ export const editProduct = expressAsyncHandler(async (req, res) => {
     console.log(err);
     res.status(500).send({ message: "INTERNAL SERVER ERROR" });
   }
+});
+
+export const importProducts = expressAsyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+  const originalName = req.file.originalname || "";
+  const extension = originalName.split(".").pop()?.toLowerCase();
+  if (!["xlsx", "xls", "csv"].includes(extension)) {
+    return res
+      .status(400)
+      .json({ message: "Only .xlsx and .csv files are supported" });
+  }
+  const result = await importProductsFromFile(req.file.buffer, originalName);
+  if (!result.success) {
+    return res.status(400).json({ message: result.message });
+  }
+  res.status(200).json(result);
+});
+
+export const exportProducts = expressAsyncHandler(async (req, res) => {
+  const idsParam = String(req.query.ids || "").trim();
+  let filter = {};
+  if (idsParam) {
+    const ids = idsParam
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    filter = { _id: { $in: ids } };
+  }
+  const products = await ProductFeed.find(filter).sort({ item_code: 1 }).lean();
+  const workbook = buildProductsWorkbook(products);
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="products-export-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+  );
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
+export const downloadImportTemplate = expressAsyncHandler(async (req, res) => {
+  const workbook = buildImportTemplateWorkbook();
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="products-import-template.xlsx"',
+  );
+  await workbook.xlsx.write(res);
+  res.end();
 });
 
 export const removeProductFeed = expressAsyncHandler(async (req, res) => {

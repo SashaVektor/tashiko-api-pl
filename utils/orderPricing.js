@@ -101,17 +101,14 @@ export const priceOrderItems = async (requestedItems) => {
         );
       }
 
-      const allowedNames = [
-        product.position_name,
-        product.position_name_ukr,
-      ].filter(Boolean);
       const pricing = resolveProductPrice(product);
       return {
         _id: id || randomUUID(),
         productCode,
-        name: allowedNames.includes(requestedName)
-          ? requestedName
-          : product.position_name_ukr || product.position_name || productCode,
+        name:
+          requestedName === product.position_name
+            ? requestedName
+            : product.position_name || productCode,
         price: pricing.resolvedPrice,
         currency: pricing.resolvedCurrency,
         imageLink: String(product.link_image || "")
