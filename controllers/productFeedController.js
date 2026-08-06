@@ -397,9 +397,12 @@ const pickProductFields = (body, fields) =>
 // Related products are always sourced from the FTP-synced (1C) catalog,
 // regardless of whether the product they're attached to is ftp- or admin-owned.
 const resolveRelatedProducts = async (rawRelated, excludeItemCode) => {
+  if (!Array.isArray(rawRelated)) {
+    return { error: "relatedProducts must be an array of product codes" };
+  }
   const codes = [
     ...new Set(
-      (Array.isArray(rawRelated) ? rawRelated : [])
+      rawRelated
         .map((code) => String(code || "").trim())
         .filter((code) => code && code !== excludeItemCode),
     ),

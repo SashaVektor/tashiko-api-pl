@@ -244,7 +244,13 @@ const reconcileImportedProducts = async (validRows, hasRelatedProductsColumn) =>
       return;
     }
 
-    const rowData = { ...row.data, relatedProducts };
+    // Same rule as FTP rows: only touch relatedProducts when the column was
+    // actually present in the file, so an import that omits it never wipes
+    // out a product's existing related-products list.
+    const { relatedProducts: _rawRelatedProducts, ...rowDataBase } = row.data;
+    const rowData = hasRelatedProductsColumn
+      ? { ...rowDataBase, relatedProducts }
+      : rowDataBase;
     if (existingProduct) {
       operations.push({
         updateOne: {
