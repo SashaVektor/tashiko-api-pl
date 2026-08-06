@@ -215,9 +215,13 @@ const reconcileImportedProducts = async (validRows, hasRelatedProductsColumn) =>
   const operations = [];
   validRows.forEach((row) => {
     const itemCode = row.data.item_code;
-    const relatedProducts = row.data.relatedProducts.filter(
-      (code) => code !== itemCode && validRelatedCodes.has(code),
-    );
+    const relatedProducts = [
+      ...new Set(
+        row.data.relatedProducts.filter(
+          (code) => code !== itemCode && validRelatedCodes.has(code),
+        ),
+      ),
+    ];
     const existingProduct = existingByCode.get(itemCode);
 
     if (existingProduct?.source === "ftp") {
