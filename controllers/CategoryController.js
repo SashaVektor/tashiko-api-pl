@@ -58,10 +58,11 @@ export const reorderCategories = expressAsyncHandler(async (req, res) => {
     return res.status(400).send({ message: "Некорректный порядок категорий!" });
   }
 
-  const existingCount = await Category.countDocuments({
-    _id: { $in: categoryIds },
-  });
-  if (existingCount !== categoryIds.length) {
+  const [existingCount, totalCount] = await Promise.all([
+    Category.countDocuments({ _id: { $in: categoryIds } }),
+    Category.countDocuments(),
+  ]);
+  if (existingCount !== categoryIds.length || totalCount !== categoryIds.length) {
     return res.status(400).send({ message: "Категория не найдена!" });
   }
 

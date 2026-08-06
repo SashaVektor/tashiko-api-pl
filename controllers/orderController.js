@@ -10,14 +10,25 @@ import {
   selectionsMatch,
 } from "../utils/orderPricing.js";
 
-const applyAdminPrices = (items, requestedItems) =>
-  items.map((item, index) => {
-    const price = Number(requestedItems[index]?.price);
+const applyAdminPrices = (items, requestedItems) => {
+  const requestedByCode = new Map();
+  for (const requested of requestedItems) {
+    const code = String(requested?.productCode || "").trim();
+    if (!code) continue;
+    if (!requestedByCode.has(code)) requestedByCode.set(code, []);
+    requestedByCode.get(code).push(requested);
+  }
+
+  return items.map((item) => {
+    const code = String(item?.productCode || "").trim();
+    const requested = requestedByCode.get(code)?.shift();
+    const price = Number(requested?.price);
     if (!Number.isFinite(price) || price < 0) {
       throw new OrderValidationError("Each product price must be zero or greater");
     }
     return { ...(item.toObject?.() || item), price };
   });
+};
 
 export const createOrder = expressAsyncHandler(async (req, res) => {
   try {

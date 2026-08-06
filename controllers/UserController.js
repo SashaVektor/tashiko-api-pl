@@ -267,6 +267,20 @@ export const updateAdminCustomer = expressAsyncHandler(async (req, res) => {
   })
 })
 
+export const deleteAdminCustomer = expressAsyncHandler(async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  const customer = await User.findById(req.params.id)
+  if (!customer || customer.status === 'adm') {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  await customer.deleteOne()
+  return res.json({ message: 'Customer deleted' })
+})
+
 export const signIn = expressAsyncHandler(async (req, res) => {
   try {
     const user = await User.findOne({ email: req.body.email })

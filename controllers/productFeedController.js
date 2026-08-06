@@ -468,7 +468,7 @@ export const importProducts = expressAsyncHandler(async (req, res) => {
   }
   const originalName = req.file.originalname || "";
   const extension = originalName.split(".").pop()?.toLowerCase();
-  if (!["xlsx", "xls", "csv"].includes(extension)) {
+  if (!["xlsx", "csv"].includes(extension)) {
     return res
       .status(400)
       .json({ message: "Only .xlsx and .csv files are supported" });
