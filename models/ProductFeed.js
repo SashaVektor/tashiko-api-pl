@@ -45,6 +45,7 @@ const productFeedSchema = new mongoose.Schema({
   value_characteristics13: { type: String },
   name_characteristics14: { type: String },
   value_characteristics14: { type: String },
+  relatedProducts: { type: [String], default: [] },
 }, { timestamps: true });
 
 const ProductFeed = mongoose.model("ProductFeed", productFeedSchema);

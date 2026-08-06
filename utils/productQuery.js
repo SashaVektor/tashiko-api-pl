@@ -19,10 +19,11 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const createSearchRegex = (value) =>
   new RegExp(escapeRegex(normalizeSearchQuery(value)), "i");
 
-export const buildProductFilter = ({ query, groupName }) => {
+export const buildProductFilter = ({ query, groupName, source }) => {
   const filter = { item_code: { $nin: [null, "", "item_code"] } };
 
   if (groupName && typeof groupName === "string") filter.group_name = groupName;
+  if (source === "ftp" || source === "admin") filter.source = source;
 
   const normalizedQuery = normalizeSearchQuery(query);
   if (!normalizedQuery) return filter;

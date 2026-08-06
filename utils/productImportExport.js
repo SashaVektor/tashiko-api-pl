@@ -28,6 +28,7 @@ export const COLUMN_ORDER = [
   "search_queries",
   "description",
   "link_image",
+  "related_products",
   ...CHARACTERISTIC_KEYS,
 ];
 
@@ -35,6 +36,7 @@ const REQUIRED_KEYS = new Set(["item_code", "position_name", "price", "quantity"
 const OPTIONAL_KEYS = COLUMN_ORDER.filter(
   (key) => !REQUIRED_KEYS.has(key) && key !== "currency",
 );
+const RELATED_PRODUCTS_KEY = "related_products";
 
 const currencyDescription = FORCE_CURRENCY
   ? `Ignored on import — every product is always saved with currency "${FORCE_CURRENCY}".`
@@ -56,6 +58,8 @@ const COLUMN_DESCRIPTIONS = {
   search_queries: "Extra search keywords.",
   description: "Description.",
   link_image: "Comma-separated list of image URLs.",
+  related_products:
+    "Comma-separated list of related product SKUs (item_code). Only existing FTP-synced (1C) products can be referenced — unknown or non-FTP codes are ignored. Can be set even for FTP-owned rows.",
   ...Object.fromEntries(
     Array.from({ length: 14 }, (_, index) => index + 1).flatMap((number) => [
       [`name_characteristics${number}`, `Characteristic #${number} name (optional, up to 14 pairs).`],
@@ -77,6 +81,7 @@ const SAMPLE_ROW = {
   country_of_production: "Korea",
   product_located: "Warehouse 1",
   link_image: "https://example.com/photo1.jpg, https://example.com/photo2.jpg",
+  related_products: "TASH-0002, TASH-0031",
   name_characteristics1: "Marka",
   value_characteristics1: "Toyota",
 };
@@ -142,7 +147,7 @@ const parseImportRows = async (buffer, originalName) => {
     if (hasValue) rows.push({ raw, lineNumber: rowNumber });
   });
 
-  return { rows };
+  return { rows, hasRelatedProductsColumn: headerMap.has(RELATED_PRODUCTS_KEY) };
 };
 
 const buildRowResult = (raw, lineNumber) => {
@@ -173,48 +178,81 @@ const buildRowResult = (raw, lineNumber) => {
 
   const data = { item_code: itemCode, position_name: positionName, price, quantity, currency };
   OPTIONAL_KEYS.forEach((key) => {
+    if (key === RELATED_PRODUCTS_KEY) return;
     data[key] = String(raw[key] || "").trim();
   });
+  data.relatedProducts = String(raw[RELATED_PRODUCTS_KEY] || "")
+    .split(",")
+    .map((code) => code.trim())
+    .filter(Boolean);
 
   return { lineNumber, itemCode, data };
 };
 
-const reconcileImportedProducts = async (validRows) => {
+const reconcileImportedProducts = async (validRows, hasRelatedProductsColumn) => {
   if (!validRows.length) {
     return { createdCount: 0, updatedCount: 0, skippedCount: 0, skipped: [] };
   }
 
   const itemCodes = validRows.map((row) => row.data.item_code);
-  const existing = await ProductFeed.find({ item_code: { $in: itemCodes } })
-    .select("_id item_code source")
-    .lean();
+  const relatedCodes = [
+    ...new Set(validRows.flatMap((row) => row.data.relatedProducts)),
+  ];
+  const [existing, validRelated] = await Promise.all([
+    ProductFeed.find({ item_code: { $in: itemCodes } })
+      .select("_id item_code source")
+      .lean(),
+    relatedCodes.length
+      ? ProductFeed.find({ item_code: { $in: relatedCodes }, source: "ftp" })
+          .select("item_code")
+          .lean()
+      : [],
+  ]);
   const existingByCode = new Map(existing.map((product) => [product.item_code, product]));
+  const validRelatedCodes = new Set(validRelated.map((product) => product.item_code));
 
   const skipped = [];
   const operations = [];
   validRows.forEach((row) => {
-    const existingProduct = existingByCode.get(row.data.item_code);
+    const itemCode = row.data.item_code;
+    const relatedProducts = row.data.relatedProducts.filter(
+      (code) => code !== itemCode && validRelatedCodes.has(code),
+    );
+    const existingProduct = existingByCode.get(itemCode);
+
     if (existingProduct?.source === "ftp") {
-      skipped.push({
-        lineNumber: row.lineNumber,
-        itemCode: row.data.item_code,
-        reason: "This SKU is managed by FTP sync and cannot be modified via import",
-      });
+      // Related products are the only field FTP-owned rows may update via
+      // import — every other field stays authoritative from the 1C sync.
+      if (hasRelatedProductsColumn) {
+        operations.push({
+          updateOne: {
+            filter: { _id: existingProduct._id },
+            update: { $set: { relatedProducts } },
+          },
+        });
+      } else {
+        skipped.push({
+          lineNumber: row.lineNumber,
+          itemCode,
+          reason: "This SKU is managed by FTP sync and cannot be modified via import",
+        });
+      }
       return;
     }
 
+    const rowData = { ...row.data, relatedProducts };
     if (existingProduct) {
       operations.push({
         updateOne: {
           filter: { _id: existingProduct._id },
-          update: { $set: { ...row.data, source: "admin" } },
+          update: { $set: { ...rowData, source: "admin" } },
         },
       });
     } else {
       operations.push({
         updateOne: {
-          filter: { item_code: row.data.item_code },
-          update: { $set: { ...row.data, source: "admin", active: true } },
+          filter: { item_code: itemCode },
+          update: { $set: { ...rowData, source: "admin", active: true } },
           upsert: true,
         },
       });
@@ -234,7 +272,8 @@ const reconcileImportedProducts = async (validRows) => {
 };
 
 export const importProductsFromFile = async (buffer, originalName) => {
-  const { rows, error: parseError } = await parseImportRows(buffer, originalName);
+  const { rows, hasRelatedProductsColumn, error: parseError } =
+    await parseImportRows(buffer, originalName);
   if (parseError) return { success: false, message: parseError };
   if (!rows.length) return { success: false, message: "The file has no data rows" };
   if (rows.length > MAX_IMPORT_ROWS) {
@@ -281,7 +320,7 @@ export const importProductsFromFile = async (buffer, originalName) => {
     }
   });
 
-  const summary = await reconcileImportedProducts(validRows);
+  const summary = await reconcileImportedProducts(validRows, hasRelatedProductsColumn);
 
   return {
     success: true,
@@ -294,6 +333,9 @@ export const importProductsFromFile = async (buffer, originalName) => {
 
 const productToRow = (product) =>
   COLUMN_ORDER.map((key) => {
+    if (key === RELATED_PRODUCTS_KEY) {
+      return (product.relatedProducts || []).join(", ");
+    }
     const value = product[key];
     return value === undefined || value === null ? "" : value;
   });
