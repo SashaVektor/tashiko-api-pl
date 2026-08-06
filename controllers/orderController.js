@@ -10,6 +10,15 @@ import {
   selectionsMatch,
 } from "../utils/orderPricing.js";
 
+const applyAdminPrices = (items, requestedItems) =>
+  items.map((item, index) => {
+    const price = Number(requestedItems[index]?.price);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new OrderValidationError("Each product price must be zero or greater");
+    }
+    return { ...(item.toObject?.() || item), price };
+  });
+
 export const createOrder = expressAsyncHandler(async (req, res) => {
   try {
     const {
@@ -109,16 +118,24 @@ export const editOrder = expressAsyncHandler(async (req, res) => {
       });
     }
 
-    if (
-      !order.isPaid &&
-      Array.isArray(requestedItems) &&
-      !selectionsMatch(order.basketItems, requestedItems)
-    ) {
-      const priced = await priceOrderItems(requestedItems);
-      assertStockAvailable(priced.items);
-      order.basketItems = priced.items;
-      order.totalPrice = priced.totalPrice;
-      order.totalQuantity = priced.totalQuantity;
+    if (!order.isPaid && Array.isArray(requestedItems)) {
+      const selectionChanged = !selectionsMatch(
+        order.basketItems,
+        requestedItems,
+      );
+      const baseItems = selectionChanged
+        ? (await priceOrderItems(requestedItems)).items
+        : order.basketItems;
+      if (selectionChanged) assertStockAvailable(baseItems);
+      const items = applyAdminPrices(baseItems, requestedItems);
+      order.basketItems = items;
+      order.totalPrice = Math.round(
+        items.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100,
+      ) / 100;
+      order.totalQuantity = items.reduce(
+        (sum, item) => sum + item.quantity,
+        0,
+      );
     }
 
     if (req.body.userInfo) {
