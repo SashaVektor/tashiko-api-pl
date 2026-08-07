@@ -1,11 +1,8 @@
 const searchableFields = [
   "item_code",
   "position_name",
-  "position_name_ukr",
   "search_queries",
-  "search_queries_ukr",
   "description",
-  "description_ukr",
   "product_type",
   "group_name",
   ...Array.from(
@@ -22,10 +19,11 @@ const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const createSearchRegex = (value) =>
   new RegExp(escapeRegex(normalizeSearchQuery(value)), "i");
 
-export const buildProductFilter = ({ query, groupName }) => {
+export const buildProductFilter = ({ query, groupName, source }) => {
   const filter = { item_code: { $nin: [null, "", "item_code"] } };
 
   if (groupName && typeof groupName === "string") filter.group_name = groupName;
+  if (source === "ftp" || source === "admin") filter.source = source;
 
   const normalizedQuery = normalizeSearchQuery(query);
   if (!normalizedQuery) return filter;
@@ -57,17 +55,15 @@ export const buildProductFilter = ({ query, groupName }) => {
   return filter;
 };
 
-export const getProductSort = (sort = "availability", language = "pl") => {
-  const nameField = language === "ua" ? "position_name_ukr" : "position_name";
-
+export const getProductSort = (sort = "availability") => {
   switch (sort) {
     case "alphabetical-asc":
-      return { [nameField]: 1, item_code: 1 };
+      return { position_name: 1, item_code: 1 };
     case "alphabetical-desc":
-      return { [nameField]: -1, item_code: 1 };
+      return { position_name: -1, item_code: 1 };
     case "availability":
     default:
-      return { quantity: -1, [nameField]: 1, item_code: 1 };
+      return { quantity: -1, position_name: 1, item_code: 1 };
   }
 };
 

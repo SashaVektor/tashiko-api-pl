@@ -2,6 +2,7 @@ import expressAsyncHandler from "express-async-handler";
 import ProductFeed from "../models/ProductFeed.js";
 import Order from "../models/Order.js";
 import OrderOneClick from "../models/OrderOneClick.js";
+import OrderStatus from "../models/OrderStatus.js";
 import User from "../models/User.js";
 import VINRequest from "../models/VINRequest.js";
 import Location from "../models/Location.js";
@@ -41,12 +42,15 @@ export const getStatistics = expressAsyncHandler(async (req, res) => {
 
     const totalPaidOrders = paidOrdersCount + paidOrdersOneClickCount;
 
+    const completedStatuses = await OrderStatus.find({ isCompleted: true });
+    const completedStatusNames = completedStatuses.map((status) => status.name);
+
     const deliveredOrdersCount = await Order.countDocuments({
-      status: "Доставлено",
+      status: { $in: completedStatusNames },
     });
 
     const completedOrdersOneClickCount = await OrderOneClick.countDocuments({
-      status: "Завершено",
+      status: { $in: completedStatusNames },
     });
 
     const totalCompletedOrders =

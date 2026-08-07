@@ -1,4 +1,5 @@
 import expressAsyncHandler from "express-async-handler";
+import mongoose from "mongoose";
 import ProductFeed from "../models/ProductFeed.js";
 import CrossNumbers from "../models/CrossNumbers.js";
 import {
@@ -10,6 +11,11 @@ import {
   normalizeSearchQuery,
 } from "../utils/productQuery.js";
 import { enrichProductsWithPricing } from "../utils/orderPricing.js";
+import {
+  buildImportTemplateWorkbook,
+  buildProductsWorkbook,
+  importProductsFromFile,
+} from "../utils/productImportExport.js";
 
 export const getProductCatalog = async (req, res) => {
   try {
@@ -18,6 +24,8 @@ export const getProductCatalog = async (req, res) => {
       category,
       sort = "availability",
       language = "pl",
+      source,
+      codes,
       page: pageValue,
       limit: limitValue,
     } = req.query;
@@ -25,9 +33,32 @@ export const getProductCatalog = async (req, res) => {
     const normalizedQuery = normalizeSearchQuery(q);
     const normalizedCategory =
       typeof category === "string" ? category.trim() : "";
+    const normalizedSource =
+      source === "ftp" || source === "admin" ? source : undefined;
+    const normalizedCodes = typeof codes === "string"
+      ? [...new Set(codes.split(",").map((code) => code.trim()).filter(Boolean))].slice(0, 200)
+      : [];
+
+    if (normalizedCodes.length) {
+      const codesFilter = {
+        item_code: { $in: normalizedCodes },
+        ...(normalizedSource ? { source: normalizedSource } : {}),
+      };
+      const products = await ProductFeed.find(codesFilter).limit(normalizedCodes.length);
+      return res.status(200).json({
+        products: await enrichProductsWithPricing(products),
+        totalProducts: products.length,
+        page: 1,
+        limit: normalizedCodes.length,
+        totalPages: 1,
+        query: "",
+      });
+    }
+
     let filter = buildProductFilter({
       query: normalizedQuery,
       groupName: normalizedCategory,
+      source: normalizedSource,
     });
 
     if (normalizedQuery) {
@@ -42,9 +73,18 @@ export const getProductCatalog = async (req, res) => {
       ];
 
       if (crossCodes.length) {
-        const searchFilter = buildProductFilter({ query: normalizedQuery });
+        const searchFilter = buildProductFilter({
+          query: normalizedQuery,
+          source: normalizedSource,
+        });
         const combinedSearch = {
-          $or: [searchFilter, { item_code: { $in: crossCodes } }],
+          $or: [
+            searchFilter,
+            {
+              item_code: { $in: crossCodes },
+              ...(normalizedSource ? { source: normalizedSource } : {}),
+            },
+          ],
         };
         filter = normalizedCategory
           ? { $and: [{ group_name: normalizedCategory }, combinedSearch] }
@@ -324,11 +364,8 @@ export const getProductsByNumber = async (req, res) => {
 const ADMIN_PRODUCT_FIELDS = [
   "active",
   "position_name",
-  "position_name_ukr",
   "search_queries",
-  "search_queries_ukr",
   "description",
-  "description_ukr",
   "product_type",
   "currency",
   "unit_of_measurement",
@@ -357,6 +394,37 @@ const pickProductFields = (body, fields) =>
       ]),
   );
 
+// Related products are always sourced from the FTP-synced (1C) catalog,
+// regardless of whether the product they're attached to is ftp- or admin-owned.
+const resolveRelatedProducts = async (rawRelated, excludeItemCode) => {
+  if (!Array.isArray(rawRelated)) {
+    return { error: "relatedProducts must be an array of product codes" };
+  }
+  const codes = [
+    ...new Set(
+      rawRelated
+        .map((code) => String(code || "").trim())
+        .filter((code) => code && code !== excludeItemCode),
+    ),
+  ];
+  if (!codes.length) return { relatedProducts: [] };
+
+  const validProducts = await ProductFeed.find({
+    item_code: { $in: codes },
+    source: "ftp",
+  })
+    .select("item_code")
+    .lean();
+  const validCodes = new Set(validProducts.map((product) => product.item_code));
+  const invalidCodes = codes.filter((code) => !validCodes.has(code));
+  if (invalidCodes.length) {
+    return {
+      error: `These related product codes are invalid or not FTP-synced: ${invalidCodes.join(", ")}`,
+    };
+  }
+  return { relatedProducts: codes };
+};
+
 export const createProduct = expressAsyncHandler(async (req, res) => {
   const itemCode = String(req.body.item_code || "").trim();
   const source = req.body.source ?? "admin";
@@ -382,6 +450,15 @@ export const createProduct = expressAsyncHandler(async (req, res) => {
       .status(400)
       .json({ message: "Price and quantity must be non-negative numbers" });
   }
+  let relatedProducts;
+  if (req.body.relatedProducts !== undefined) {
+    const resolved = await resolveRelatedProducts(
+      req.body.relatedProducts,
+      itemCode,
+    );
+    if (resolved.error) return res.status(400).json({ message: resolved.error });
+    relatedProducts = resolved.relatedProducts;
+  }
   const product = await ProductFeed.create({
     ...pickProductFields(req.body, ADMIN_PRODUCT_FIELDS),
     source,
@@ -390,6 +467,7 @@ export const createProduct = expressAsyncHandler(async (req, res) => {
     quantity,
     currency,
     active: req.body.active !== false,
+    ...(relatedProducts !== undefined ? { relatedProducts } : {}),
   });
   res.status(201).json({ message: "Продукт создан успешно!", product });
 });
@@ -409,6 +487,20 @@ export const editProduct = expressAsyncHandler(async (req, res) => {
       const updates = pickProductFields(req.body, editableFields);
       updates.source = source;
       updates.currency = "PLN";
+
+      if (req.body.relatedProducts !== undefined) {
+        const excludeItemCode = String(
+          updates.item_code || product.item_code || "",
+        ).trim();
+        const resolved = await resolveRelatedProducts(
+          req.body.relatedProducts,
+          excludeItemCode,
+        );
+        if (resolved.error) {
+          return res.status(400).json({ message: resolved.error });
+        }
+        updates.relatedProducts = resolved.relatedProducts;
+      }
 
       if (source === "admin") {
         const itemCode = String(
@@ -457,6 +549,62 @@ export const editProduct = expressAsyncHandler(async (req, res) => {
     console.log(err);
     res.status(500).send({ message: "INTERNAL SERVER ERROR" });
   }
+});
+
+export const importProducts = expressAsyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: "No file uploaded" });
+  }
+  const originalName = req.file.originalname || "";
+  const extension = originalName.split(".").pop()?.toLowerCase();
+  if (!["xlsx", "csv"].includes(extension)) {
+    return res
+      .status(400)
+      .json({ message: "Only .xlsx and .csv files are supported" });
+  }
+  const result = await importProductsFromFile(req.file.buffer, originalName);
+  if (!result.success) {
+    return res.status(400).json({ message: result.message });
+  }
+  res.status(200).json(result);
+});
+
+export const exportProducts = expressAsyncHandler(async (req, res) => {
+  const idsParam = String(req.query.ids || "").trim();
+  let filter = {};
+  if (idsParam) {
+    const ids = idsParam
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+    filter = { _id: { $in: ids } };
+  }
+  const products = await ProductFeed.find(filter).sort({ item_code: 1 }).lean();
+  const workbook = buildProductsWorkbook(products);
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="products-export-${new Date().toISOString().slice(0, 10)}.xlsx"`,
+  );
+  await workbook.xlsx.write(res);
+  res.end();
+});
+
+export const downloadImportTemplate = expressAsyncHandler(async (req, res) => {
+  const workbook = buildImportTemplateWorkbook();
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="products-import-template.xlsx"',
+  );
+  await workbook.xlsx.write(res);
+  res.end();
 });
 
 export const removeProductFeed = expressAsyncHandler(async (req, res) => {

@@ -16,6 +16,28 @@ const escapeRegExp = (value = '') =>
 const regularOrdersCollection = Order.collection.name
 const oneClickOrdersCollection = OrderOneClick.collection.name
 
+const normalizeCustomerInput = (body = {}) => ({
+  name: String(body.name || '').trim(),
+  email: String(body.email || '').trim().toLowerCase(),
+  phone: String(body.phone || '').trim(),
+  address: String(body.address || '').trim(),
+  fop: String(body.fop || '').trim(),
+})
+
+const validateCustomerInput = ({ name, email, phone, address }) => {
+  if (!name || !email || !phone || !address) {
+    return 'Name, email, phone and address are required'
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return 'Invalid email address'
+  }
+  const normalizedPhone = phone.replace(/[\s()-]/g, '')
+  if (!/^(?:\+48|48)?\d{9}$/.test(normalizedPhone)) {
+    return 'Invalid phone number'
+  }
+  return null
+}
+
 export const getAdminCustomers = expressAsyncHandler(async (req, res) => {
   const page = Math.max(Number.parseInt(req.query.page, 10) || 1, 1)
   const limit = Math.min(
@@ -179,6 +201,84 @@ export const getAdminCustomerProfile = expressAsyncHandler(async (req, res) => {
     regularTotalPages: Math.ceil(totalRegularOrders / limit),
     oneClickTotalPages: Math.ceil(totalOneClickOrders / limit),
   })
+})
+
+export const createAdminCustomer = expressAsyncHandler(async (req, res) => {
+  const customerInput = normalizeCustomerInput(req.body)
+  const validationError = validateCustomerInput(customerInput)
+  if (validationError) {
+    return res.status(400).json({ message: validationError })
+  }
+
+  const password = String(req.body.password || '')
+  if (password.length < 6) {
+    return res.status(400).json({ message: 'Password must contain at least 6 characters' })
+  }
+
+  const existingCustomer = await User.findOne({ email: customerInput.email })
+  if (existingCustomer) {
+    return res.status(409).json({ message: 'A user with this email already exists' })
+  }
+
+  const customer = await User.create({
+    ...customerInput,
+    password: bcrypt.hashSync(password, bcrypt.genSaltSync(10)),
+    status: 'member',
+  })
+
+  return res.status(201).json({
+    customer: await User.findById(customer._id).select(
+      'name email phone address fop status createdAt updatedAt',
+    ),
+  })
+})
+
+export const updateAdminCustomer = expressAsyncHandler(async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  const customer = await User.findById(req.params.id)
+  if (!customer || customer.status === 'adm') {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  const customerInput = normalizeCustomerInput(req.body)
+  const validationError = validateCustomerInput(customerInput)
+  if (validationError) {
+    return res.status(400).json({ message: validationError })
+  }
+
+  const duplicate = await User.findOne({
+    email: customerInput.email,
+    _id: { $ne: customer._id },
+  })
+  if (duplicate) {
+    return res.status(409).json({ message: 'A user with this email already exists' })
+  }
+
+  Object.assign(customer, customerInput)
+  await customer.save()
+
+  return res.json({
+    customer: await User.findById(customer._id).select(
+      'name email phone address fop status createdAt updatedAt',
+    ),
+  })
+})
+
+export const deleteAdminCustomer = expressAsyncHandler(async (req, res) => {
+  if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  const customer = await User.findById(req.params.id)
+  if (!customer || customer.status === 'adm') {
+    return res.status(404).json({ message: 'Customer not found' })
+  }
+
+  await customer.deleteOne()
+  return res.json({ message: 'Customer deleted' })
 })
 
 export const signIn = expressAsyncHandler(async (req, res) => {

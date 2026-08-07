@@ -5,11 +5,8 @@ const productFeedSchema = new mongoose.Schema({
   active: { type: Boolean, default: true, index: true },
   item_code: { type: String },
   position_name: { type: String },
-  position_name_ukr: { type: String },
   search_queries: { type: String },
-  search_queries_ukr: { type: String },
   description: { type: String },
-  description_ukr: { type: String },
   product_type: { type: String },
   price: { type: String },
   currency: { type: String },
@@ -48,6 +45,7 @@ const productFeedSchema = new mongoose.Schema({
   value_characteristics13: { type: String },
   name_characteristics14: { type: String },
   value_characteristics14: { type: String },
+  relatedProducts: { type: [String], default: [] },
 }, { timestamps: true });
 
 const ProductFeed = mongoose.model("ProductFeed", productFeedSchema);

@@ -13,7 +13,8 @@
     "migrate:remove-ukrainian-locations": "node migrations/20260801-remove-ukrainian-locations.js",
     "migrate:product-source": "node migrations/20260722-set-product-source.js",
     "migrate:one-click-totals": "node migrations/20260723-backfill-one-click-totals.js",
-    "migrate:pricing": "node migrations/20260724-pricing-and-product-index.js"
+    "migrate:pricing": "node migrations/20260724-pricing-and-product-index.js",
+    "migrate:order-payment-statuses": "node migrations/20260805-seed-order-payment-statuses.js"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +27,7 @@
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
     "express": "^4.18.2",
     "express-async-handler": "^1.2.0",
     "jsonwebtoken": "^9.0.0",

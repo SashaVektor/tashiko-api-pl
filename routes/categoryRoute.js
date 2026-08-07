@@ -1,6 +1,6 @@
 import express from "express"
 import {isAdmin, isAuth} from "../utils.js"
-import { createCategory, editCategory, getCategories, getFilteredCategories, removeCaterory } from "../controllers/CategoryController.js"
+import { createCategory, editCategory, getCategories, getFilteredCategories, removeCaterory, reorderCategories } from "../controllers/CategoryController.js"
 
 const categoryRoute = express.Router()
 
@@ -11,6 +11,8 @@ categoryRoute.get("/filteded-cateroty", getFilteredCategories)
 categoryRoute.delete("/:id", isAuth, isAdmin, removeCaterory)
 
 categoryRoute.post("/", isAuth, isAdmin, createCategory)
+
+categoryRoute.patch("/reorder", isAuth, isAdmin, reorderCategories)
 
 categoryRoute.patch("/:id", isAuth, isAdmin, editCategory)
 
